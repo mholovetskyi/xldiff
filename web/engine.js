@@ -393,6 +393,28 @@ function trace(start, dependents, moved, limit) {
   return { count: order.length - 1, path: path };
 }
 
+/* FNV-1a over the identifying fields of a finding. Deliberately not a hash of
+   the whole finding: the id has to survive a re-run, a row moving, and a value
+   changing downstream, but it must NOT survive an edit to the formula itself.
+   A waiver says "I looked at this change and accepted it", so a different
+   change deserves a fresh look.
+
+   charCodeAt order is the contract — the Python engine walks UTF-16 code units
+   to match it, or a waiver written here would not match the same finding in
+   CI. */
+function fingerprint() {
+  var h = 2166136261;
+  for (var i = 0; i < arguments.length; i++) {
+    var part = String(arguments[i] === undefined ? "" : arguments[i]) + "";
+    for (var j = 0; j < part.length; j++) {
+      var unit = part.charCodeAt(j);
+      h = Math.imul(h ^ (unit & 0xFF), 16777619) >>> 0;
+      h = Math.imul(h ^ ((unit >> 8) & 0xFF), 16777619) >>> 0;
+    }
+  }
+  return ("0000000" + h.toString(16)).slice(-8);
+}
+
 function cellLabel(key) {
   var p = key.split(SEP);
   return p[0] + "!" + colLetter(+p[2]) + p[1];
@@ -453,7 +475,8 @@ function F(sev, kind, sheet, ref, summary, o) {
     valBefore: o.vb || "", valAfter: o.va || "", magnitude: o.mag || 0,
     rowLeft: o.lr || 0, rowRight: o.rr || 0,
     chain: [], downstream: 0,
-    outputs: [], outputImpact: 0, onOutput: false
+    outputs: [], outputImpact: 0, onOutput: false,
+    id: "", waived: false, waiver: null
   };
 }
 
@@ -773,6 +796,10 @@ function compare(wbA, wbB, outputSpec) {
       { detail: "Showing the " + IMPACT_CAP + " largest by relative change." }));
   }
 
+  findings.forEach(function (f) {
+    f.id = fingerprint(f.kind, f.sheet, f.ref, f.before, f.after);
+  });
+
   var graph = attachChains(findings, right, namesB);
   var inv = buildInverse(align);
   var declared = parseOutputSpec(outputSpec, right);
@@ -798,6 +825,6 @@ function compare(wbA, wbB, outputSpec) {
 }
 
 root.xldiff = { compare: compare, toR1C1: toR1C1, fmt: fmt, colLetter: colLetter,
-  get: get, precedents: precedents, SEP: SEP };
+  get: get, precedents: precedents, SEP: SEP, fingerprint: fingerprint };
 
 })(typeof module !== "undefined" && module.exports ? module.exports : (typeof window !== "undefined" ? window : this));

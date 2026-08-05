@@ -78,6 +78,20 @@ check(growth.chain.length >= 3,
 check(s.findings.filter((f) => f.kind === "impact").every((f) => !f.chain.length),
   "impact findings carry no chain: they are the far end of someone else's");
 
+console.log("finding ids");
+// A waiver written in the browser has to match the same finding in CI, so the
+// id is a cross-engine contract. tests/test_parity.py compares them run for
+// run; this pins the shape and the rule the id encodes.
+check(/^[0-9a-f]{8}$/.test(s.findings[0].id), "an id is eight hex characters");
+check(new Set(s.findings.map((f) => f.id)).size === s.findings.length,
+  "every finding in this comparison has a distinct id");
+check(xldiff.fingerprint("hardcode", "S", "C14", "=A1*2", "500") !==
+      xldiff.fingerprint("hardcode", "S", "C14", "=A1*2", "600"),
+  "editing the change itself produces a different id");
+check(xldiff.fingerprint("hardcode", "S", "C14", "=A1*2", "500") ===
+      xldiff.fingerprint("hardcode", "S", "C14", "=A1*2", "500"),
+  "and an identical change produces the same one");
+
 console.log("ranking against model outputs");
 check(s.outputs.length && !s.outputsDeclared,
   "outputs are detected when none are declared (" + s.outputs.length + " found)");

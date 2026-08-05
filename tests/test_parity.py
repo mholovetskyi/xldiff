@@ -50,7 +50,7 @@ def py_findings(a, b):
     return {
         "stale": r["stale"],
         "findings": [{
-            "severity": f.severity, "kind": f.kind, "sheet": f.sheet, "ref": f.ref,
+            "id": f.id, "severity": f.severity, "kind": f.kind, "sheet": f.sheet, "ref": f.ref,
             "summary": f.summary, "detail": f.detail,
             "before": f.before, "after": f.after,
             "valBefore": f.val_before, "valAfter": f.val_after,

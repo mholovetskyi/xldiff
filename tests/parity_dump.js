@@ -17,7 +17,7 @@ const r = xldiff.compare(a, b);
 process.stdout.write(JSON.stringify({
   stale: r.stale,
   findings: r.findings.map((f) => ({
-    severity: f.severity, kind: f.kind, sheet: f.sheet, ref: f.ref,
+    id: f.id, severity: f.severity, kind: f.kind, sheet: f.sheet, ref: f.ref,
     summary: f.summary, detail: f.detail,
     before: f.before, after: f.after,
     valBefore: f.valBefore, valAfter: f.valAfter,

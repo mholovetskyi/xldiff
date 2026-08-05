@@ -261,6 +261,8 @@ details>summary::-webkit-details-marker{display:none}
         <button data-layer="impact">Impact</button>
       </span>
       <button class="tbtn" id="supbtn" hidden></button>
+      <button class="tbtn" id="loadw">Waivers</button>
+      <input type="file" id="wfile" accept=".json,application/json" hidden>
       <button class="tbtn" id="rerun">Re-run</button>
       <button class="tbtn pr" id="exportbtn">Export</button>
     </div>
@@ -316,6 +318,9 @@ details>summary::-webkit-details-marker{display:none}
     <label class="opt"><input type="radio" name="xf" value="json"><span class="dot"></span>
       <span><span class="hd" style="font-size:13.5px;display:block">JSON</span>
       <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">Same findings, machine-readable. What a CI gate reads.</span></span></label>
+    <label class="opt"><input type="radio" name="xf" value="waivers"><span class="dot"></span>
+      <span><span class="hd" style="font-size:13.5px;display:block">Waiver file</span>
+      <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">The findings you suppressed, as a file to commit. The CLI gate stops reporting them until the change itself is edited again.</span></span></label>
     <div style="padding:11px 14px;border-bottom:1px solid var(--color-divider)">
       <label class="opt chk" style="padding:0;border:0;gap:9px"><input type="checkbox" id="xsup"><span class="dot"></span>
         <span style="font-size:12px">Include suppressed findings</span></label>
@@ -740,6 +745,28 @@ function trace(start, dependents, moved, limit) {
   return { count: order.length - 1, path: path };
 }
 
+/* FNV-1a over the identifying fields of a finding. Deliberately not a hash of
+   the whole finding: the id has to survive a re-run, a row moving, and a value
+   changing downstream, but it must NOT survive an edit to the formula itself.
+   A waiver says "I looked at this change and accepted it", so a different
+   change deserves a fresh look.
+
+   charCodeAt order is the contract — the Python engine walks UTF-16 code units
+   to match it, or a waiver written here would not match the same finding in
+   CI. */
+function fingerprint() {
+  var h = 2166136261;
+  for (var i = 0; i < arguments.length; i++) {
+    var part = String(arguments[i] === undefined ? "" : arguments[i]) + "";
+    for (var j = 0; j < part.length; j++) {
+      var unit = part.charCodeAt(j);
+      h = Math.imul(h ^ (unit & 0xFF), 16777619) >>> 0;
+      h = Math.imul(h ^ ((unit >> 8) & 0xFF), 16777619) >>> 0;
+    }
+  }
+  return ("0000000" + h.toString(16)).slice(-8);
+}
+
 function cellLabel(key) {
   var p = key.split(SEP);
   return p[0] + "!" + colLetter(+p[2]) + p[1];
@@ -800,7 +827,8 @@ function F(sev, kind, sheet, ref, summary, o) {
     valBefore: o.vb || "", valAfter: o.va || "", magnitude: o.mag || 0,
     rowLeft: o.lr || 0, rowRight: o.rr || 0,
     chain: [], downstream: 0,
-    outputs: [], outputImpact: 0, onOutput: false
+    outputs: [], outputImpact: 0, onOutput: false,
+    id: "", waived: false, waiver: null
   };
 }
 
@@ -1120,6 +1148,10 @@ function compare(wbA, wbB, outputSpec) {
       { detail: "Showing the " + IMPACT_CAP + " largest by relative change." }));
   }
 
+  findings.forEach(function (f) {
+    f.id = fingerprint(f.kind, f.sheet, f.ref, f.before, f.after);
+  });
+
   var graph = attachChains(findings, right, namesB);
   var inv = buildInverse(align);
   var declared = parseOutputSpec(outputSpec, right);
@@ -1145,7 +1177,7 @@ function compare(wbA, wbB, outputSpec) {
 }
 
 root.xldiff = { compare: compare, toR1C1: toR1C1, fmt: fmt, colLetter: colLetter,
-  get: get, precedents: precedents, SEP: SEP };
+  get: get, precedents: precedents, SEP: SEP, fingerprint: fingerprint };
 
 })(typeof module !== "undefined" && module.exports ? module.exports : (typeof window !== "undefined" ? window : this));
 </script>
@@ -1156,6 +1188,7 @@ root.xldiff = { compare: compare, toR1C1: toR1C1, fmt: fmt, colLetter: colLetter
 var CONTEXT=2, MAX_COLS=14;
 var files={A:null,B:null}, R=null, sheets=[], active=0, layer="formulas";
 var sel=null, suppressed={}, tokenView=false, showSup=true;
+var waiverMeta={};
 
 function $(id){return document.getElementById(id);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){
@@ -1332,7 +1365,7 @@ function runAnalysis(sheet,ref){
 }
 
 /* ── verdict (1a) ────────────────────────────────────────────────────── */
-function visible(){ return R.findings.filter(function(f,i){return !suppressed[i];}); }
+function visible(){ return R.findings.filter(function(f){return !suppressed[f.id];}); }
 
 function worstConfidence(){
   var lo=1;
@@ -1568,7 +1601,7 @@ function list(){
   var e=$("findings"); e.innerHTML="";
   var shown=0;
   R.findings.forEach(function(f,i){
-    var off=!!suppressed[i];
+    var off=!!suppressed[f.id];
     if(!off) shown++;
     else if(!showSup) return;
     var b=el("button","fi"+(off?" off":"")+
@@ -1582,6 +1615,8 @@ function list(){
     if(f.sheet&&f.ref) b.appendChild(el("div","mi",esc(f.sheet)));
     b.appendChild(el("div","fi-d",esc(f.summary)));
     if(f.detail) b.appendChild(el("div","fi-d dim",esc(f.detail)));
+    if(off&&waiverMeta[f.id]&&waiverMeta[f.id].reason)
+      b.appendChild(el("div","mi","waived: "+esc(waiverMeta[f.id].reason))).style.textTransform="none";
     if(f.outputs&&f.outputs.length&&f.outputImpact>0){
       var o=f.outputs[0];
       b.appendChild(el("div","mo",
@@ -1685,7 +1720,7 @@ function strip(){
     h+="</div></div>";
 
     h+='<div style="display:flex;flex-direction:column;gap:6px;flex:none">'+
-       '<button class="tbtn" id="supone">'+(suppressed[sel.i]?"Restore":"Suppress")+"</button>"+
+       '<button class="tbtn" id="supone">'+(suppressed[sel.f.id]?"Restore":"Suppress")+"</button>"+
        '<button class="tbtn" id="copyref">Copy ref</button></div>';
   }
   e.innerHTML=h;
@@ -1694,7 +1729,9 @@ function strip(){
   if(d) d.ontoggle=function(){tokenView=d.open;};
   var sup=$("supone");
   if(sup) sup.onclick=function(){
-    if(suppressed[sel.i]) delete suppressed[sel.i]; else suppressed[sel.i]=1;
+    var id=sel.f.id;
+    if(suppressed[id]){delete suppressed[id];delete waiverMeta[id];}
+    else suppressed[id]=1;
     verdict();list();strip();
   };
   var cp=$("copyref");
@@ -1787,7 +1824,7 @@ function chosen(){
 }
 function payload(){
   var keep=$("xsup").checked;
-  return R.findings.filter(function(f,i){return keep||!suppressed[i];});
+  return R.findings.filter(function(f){return keep||!suppressed[f.id];});
 }
 function download(name,mime,text){
   var blob=new Blob([text],{type:mime});
@@ -1798,7 +1835,17 @@ function download(name,mime,text){
 }
 $("xgo").onclick=function(){
   var f=payload();
-  if(chosen()==="json"){
+  if(chosen()==="waivers"){
+    var picked=R.findings.filter(function(x){return suppressed[x.id];});
+    download("xldiff-waivers.json","application/json",JSON.stringify({
+      version:1,
+      waivers:picked.map(function(x){
+        var meta=waiverMeta[x.id]||{};
+        return {id:x.id, ref:x.ref?(x.sheet+"!"+x.ref):x.sheet, kind:x.kind,
+          reason:meta.reason||"", who:meta.who||"", when:meta.when||""};
+      })
+    },null,2));
+  }else if(chosen()==="json"){
     download("xldiff-findings.json","application/json",JSON.stringify({
       baseline:files.A.name, revised:files.B.name,
       generated:new Date().toISOString(), stale:R.stale,
@@ -1851,6 +1898,43 @@ function report(f){
       c.high+" high · "+c.medium+" medium · "+c.low+" low · alignment confidence "+conf.toFixed(2)+
       "<br>One file. No assets, no network, no JavaScript required to read it.</div></div>"+
     rows+"</div></div></body></html>";
+}
+
+$("loadw").onclick=function(){ $("wfile").click(); };
+$("wfile").onchange=function(){
+  var file=$("wfile").files[0];
+  if(!file) return;
+  var fr=new FileReader();
+  fr.onload=function(){
+    var data, applied=0, unmatched=0;
+    try{ data=JSON.parse(fr.result); }
+    catch(e){ note("That file is not JSON, so there are no waivers to read."); return; }
+    if(!data||!Array.isArray(data.waivers)){
+      note('That JSON has no "waivers" list, so it is not a waiver file.'); return; }
+    var byId={};
+    R.findings.forEach(function(f){ byId[f.id]=1; });
+    data.waivers.forEach(function(w){
+      if(!w||!w.id) return;
+      if(byId[w.id]){ suppressed[w.id]=1; waiverMeta[w.id]=w; applied++; }
+      else unmatched++;
+    });
+    /* A waiver that matches nothing usually means the change it covered was
+       edited again, so the acceptance no longer describes what is there. */
+    note(applied+" waiver"+(applied===1?"":"s")+" applied"+
+      (unmatched?", "+unmatched+(unmatched===1?" no longer matches":" no longer match")+
+        " anything in this comparison":"")+".");
+    verdict(); list(); strip();
+  };
+  fr.readAsText(file);
+  $("wfile").value="";
+};
+function note(text){
+  var band=$("warnband");
+  var el=document.createElement("div");
+  el.className="warn";
+  el.innerHTML='<span class="sv">WAIVERS</span><span>'+esc(text)+"</span>";
+  band.appendChild(el);
+  setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); },6000);
 }
 
 wire("A"); wire("B");

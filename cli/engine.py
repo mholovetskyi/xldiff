@@ -105,6 +105,38 @@ class Cell:
         return self.formula is None and self.value is None
 
 
+def _utf16_units(text):
+    """Code units, matching what JavaScript's charCodeAt yields per character.
+
+    The two engines have to agree on finding IDs to the character, or a waiver
+    written in the browser will not match the same finding in CI.
+    """
+    for ch in text:
+        o = ord(ch)
+        if o > 0xFFFF:
+            o -= 0x10000
+            yield 0xD800 + (o >> 10)
+            yield 0xDC00 + (o & 0x3FF)
+        else:
+            yield o
+
+
+def fingerprint(*parts):
+    """FNV-1a over the identifying fields of a finding.
+
+    Deliberately not a hash of the whole finding: the id has to survive a
+    re-run, a row moving, and a value changing downstream, but it must NOT
+    survive an edit to the formula itself. A waiver says "I looked at this
+    change and accepted it", so a different change deserves a fresh look.
+    """
+    h = 2166136261
+    for part in parts:
+        for unit in _utf16_units(str(part) + "\x1f"):
+            h = ((h ^ (unit & 0xFF)) * 16777619) & 0xFFFFFFFF
+            h = ((h ^ ((unit >> 8) & 0xFF)) * 16777619) & 0xFFFFFFFF
+    return "%08x" % h
+
+
 def cell_label(cell):
     """(sheet, row, col) as the reference a reader would type."""
     return "%s!%s%d" % (cell[0], get_column_letter(cell[2]), cell[1])
@@ -130,6 +162,9 @@ class Finding:
     outputs: list = field(default_factory=list)
     output_impact: float = 0.0
     on_output: bool = False
+    id: str = ""
+    waived: bool = False
+    waiver: dict = field(default_factory=dict)
 
     SEV_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -898,6 +933,9 @@ def compare(path_a, path_b, outputs=None):
             "low", "impact_capped", "", "",
             "%d further cells moved in value with no edit" % suppressed,
             "Showing the %d largest by relative change." % IMPACT_CAP))
+
+    for f in findings:
+        f.id = fingerprint(f.kind, f.sheet, f.ref, f.before, f.after)
 
     graph = attach_chains(findings, right, names_b, align)
     inv = build_inverse(align)

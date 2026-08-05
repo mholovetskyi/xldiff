@@ -23,6 +23,8 @@ jobs:
         working-directory: web
       - name: The two engines agree finding for finding
         run: python tests/test_parity.py
+      - name: Waivers survive a re-run and gate correctly
+        run: python tests/test_waivers.py
       - name: CLI runs end to end
         run: |
           python cli/cli.py examples/model_v14.xlsx examples/model_v15.xlsx \

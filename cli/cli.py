@@ -12,6 +12,7 @@ import json
 import os
 import sys
 
+import waivers as waiver_file
 from engine import compare
 from report import render
 
@@ -32,6 +33,12 @@ def main(argv=None):
                     help="cells to rank findings against, comma separated, "
                          "e.g. \"Summary!B10,Model!C4\". Detected automatically "
                          "if not given.")
+    ap.add_argument("--waivers", default="",
+                    help="JSON file of findings already reviewed and accepted. "
+                         "They are reported separately and never fail the gate.")
+    ap.add_argument("--write-waivers", dest="write_waivers", default="",
+                    help="write a waiver file covering every finding in this "
+                         "run, to edit down and commit.")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
 
@@ -42,8 +49,25 @@ def main(argv=None):
 
     declared = [x.strip() for x in a.outputs.split(",") if x.strip()]
     result = compare(a.old, a.new, declared)
-    findings = result["findings"]
+    all_findings = result["findings"]
+
+    try:
+        accepted = waiver_file.load(a.waivers)
+    except waiver_file.WaiverError as exc:
+        sys.stderr.write("%s\n" % exc)
+        return 2
+    findings = waiver_file.apply(all_findings, accepted)
+    waived = [f for f in all_findings if f.waived]
+    orphaned = waiver_file.stale(all_findings, accepted)
+    result["findings"] = findings
     tty = sys.stdout.isatty()
+
+    if a.write_waivers:
+        with open(a.write_waivers, "w", encoding="utf-8") as fh:
+            json.dump(waiver_file.dump(all_findings), fh, indent=2)
+        if not a.quiet:
+            print("waiver template: %s (%d findings, add a reason to each)"
+                  % (os.path.abspath(a.write_waivers), len(all_findings)))
 
     if not a.quiet:
         counts = {s: sum(1 for f in findings if f.severity == s)
@@ -51,6 +75,16 @@ def main(argv=None):
         print("%s -> %s" % (os.path.basename(a.old), os.path.basename(a.new)))
         print("%d findings: %d high, %d medium, %d low"
               % (len(findings), counts["high"], counts["medium"], counts["low"]))
+        if waived:
+            print("%d finding%s waived" % (len(waived), "" if len(waived) == 1 else "s"))
+        if orphaned:
+            # A waiver that matches nothing usually means the change it covered
+            # was edited again, so the acceptance no longer describes what is
+            # there now. Silence would let it rot unnoticed.
+            print("%d waiver%s no longer match%s anything: %s"
+                  % (len(orphaned), "" if len(orphaned) == 1 else "s",
+                     "es" if len(orphaned) == 1 else "",
+                     ", ".join(w.get("ref") or w["id"] for w in orphaned[:5])))
         if result["stale"]:
             print("warning: a file has no cached values, so value impact is incomplete")
         print("")
