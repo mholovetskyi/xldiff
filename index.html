@@ -327,6 +327,13 @@ details>summary::-webkit-details-marker{display:none}
     <div style="padding:11px 14px;border-bottom:1px solid var(--color-divider)">
       <label class="opt chk" style="padding:0;border:0;gap:9px"><input type="checkbox" id="xsup"><span class="dot"></span>
         <span style="font-size:12px">Include suppressed findings</span></label>
+      <label style="display:flex;align-items:center;gap:9px;margin-top:10px">
+        <span class="mi" style="flex:none">Reviewed by</span>
+        <input id="xwho" type="text" placeholder="your name"
+          style="flex:1;min-width:0;font:inherit;font-size:12px;padding:4px 7px;
+          border:1px solid var(--color-divider);border-radius:0;
+          background:transparent;color:inherit">
+      </label>
     </div>
     <div style="padding:12px 14px;display:flex;align-items:center;gap:10px">
       <button class="tbtn pr" id="xgo" style="padding:7px 16px">Save file</button>
@@ -1193,6 +1200,27 @@ var files={A:null,B:null}, R=null, sheets=[], active=0, layer="formulas";
 var sel=null, suppressed={}, tokenView=false, showSup=true;
 var waiverMeta={};
 
+/* Review state, per finding id: "ok" means looked at and fine, "flag" means
+   looked at and it needs fixing. Absent means nobody has looked yet, which is
+   the distinction that makes coverage worth reporting — "no high findings
+   outstanding" and "nobody opened the file" are not the same claim. */
+var review={}, reviewer="";
+
+function coverage(){
+  var seen=0, total=0, highSeen=0, highTotal=0, flagged=0;
+  R.findings.forEach(function(f){
+    if(suppressed[f.id]) return;
+    total++;
+    if(f.severity==="high") highTotal++;
+    if(review[f.id]){
+      seen++;
+      if(f.severity==="high") highSeen++;
+      if(review[f.id]==="flag") flagged++;
+    }
+  });
+  return {seen:seen,total:total,highSeen:highSeen,highTotal:highTotal,flagged:flagged};
+}
+
 function $(id){return document.getElementById(id);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){
   return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
@@ -1422,6 +1450,9 @@ function verdict(){
     "alignment confidence "+conf.toFixed(2)];
   var nsup=Object.keys(suppressed).length;
   if(nsup) bits.push(nsup+" suppressed");
+  var cov=coverage();
+  if(cov.seen) bits.push(cov.highSeen+"/"+cov.highTotal+" high reviewed");
+  if(cov.flagged) bits.push(cov.flagged+" flagged for fixing");
   $("counts").textContent=bits.join(" · ");
 }
 function word(n){
@@ -1612,6 +1643,14 @@ function list(){
     var t=el("div","fi-t");
     t.appendChild(el("span","sv sv-"+f.severity,f.severity.toUpperCase()));
     t.appendChild(el("span","fi-r",esc(f.ref||f.sheet||"—")));
+    if(review[f.id]){
+      var mark=el("span","mo",review[f.id]==="flag"?"!":"✓");
+      mark.style.cssText="font-size:11px;flex:none;"+
+        (review[f.id]==="flag"
+          ? "color:var(--color-bg);background:var(--color-accent-900);padding:0 4px"
+          : "color:var(--color-accent-700)");
+      t.appendChild(mark);
+    }
     t.appendChild(el("span","mi",kindLabel(f.kind)));
     t.lastChild.style.marginLeft="auto";
     b.appendChild(t);
@@ -1632,7 +1671,9 @@ function list(){
     b.onclick=function(){select(i);};
     e.appendChild(b);
   });
-  $("fcount").textContent=shown+" finding"+(shown===1?"":"s");
+  var cov=coverage();
+  $("fcount").textContent=shown+" finding"+(shown===1?"":"s")+
+    (cov.total?" · "+cov.seen+"/"+cov.total+" reviewed":"");
   var nsup=Object.keys(suppressed).length;
   $("supbtn").hidden=!nsup;
   $("supbtn").textContent=(showSup?"Hide":"Show")+" suppressed · "+nsup;
@@ -1722,11 +1763,28 @@ function strip(){
     }else h+='<span class="dim">no cached value</span>';
     h+="</div></div>";
 
+    var st=review[f.id]||"";
     h+='<div style="display:flex;flex-direction:column;gap:6px;flex:none">'+
+       '<span class="sg" role="group" aria-label="Review state">'+
+       '<button id="revok"'+(st==="ok"?' class="on"':"")+'>Reviewed</button>'+
+       '<button id="revflag"'+(st==="flag"?' class="on"':"")+'>Needs fixing</button></span>'+
        '<button class="tbtn" id="supone">'+(suppressed[sel.f.id]?"Restore":"Suppress")+"</button>"+
        '<button class="tbtn" id="copyref">Copy ref</button></div>';
   }
   e.innerHTML=h;
+
+  ["revok","revflag"].forEach(function(id){
+    var b=$(id);
+    if(!b) return;
+    b.onclick=function(){
+      var want=id==="revok"?"ok":"flag";
+      /* Clicking the state it already has clears it, so a wrong click is
+         undone the same way it was made and the count stays honest. */
+      if(review[sel.f.id]===want) delete review[sel.f.id];
+      else review[sel.f.id]=want;
+      verdict();list();strip();
+    };
+  });
 
   var d=e.querySelector("details");
   if(d) d.ontoggle=function(){tokenView=d.open;};
@@ -1838,6 +1896,7 @@ function download(name,mime,body){
 }
 $("xgo").onclick=function(){
   var f=payload();
+  reviewer=$("xwho").value.trim();
   if(chosen()==="xlsx"){
     annotateWorkbook(f);
     $("exportdlg").hidden=true;
@@ -1854,10 +1913,19 @@ $("xgo").onclick=function(){
       })
     },null,2));
   }else if(chosen()==="json"){
+    var cov=coverage();
     download("xldiff-findings.json","application/json",JSON.stringify({
       baseline:files.A.name, revised:files.B.name,
       generated:new Date().toISOString(), stale:R.stale,
-      alignmentConfidence:worstConfidence(), findings:f
+      alignmentConfidence:worstConfidence(),
+      reviewedBy:reviewer,
+      coverage:{reviewed:cov.seen, total:cov.total,
+        highReviewed:cov.highSeen, highTotal:cov.highTotal, flagged:cov.flagged},
+      findings:f.map(function(x){
+        var o={}; for(var k in x) o[k]=x[k];
+        o.review=review[x.id]||"unreviewed";
+        return o;
+      })
     },null,2));
   }else{
     download("xldiff-report.html","text/html",report(f));
@@ -1926,6 +1994,35 @@ function commentText(group){
   return lines.join("\n").replace(/\n+$/, "");
 }
 
+/* The sign-off block. This is the part that goes in the deal file: not "the
+   tool found nine things" but "a named person looked at all nine on this date,
+   and flagged two". Coverage is stated even when it is zero, because a report
+   that omits the line reads as though the question was never asked. */
+function signoff(list){
+  var seen=0, high=0, highSeen=0, flagged=0;
+  list.forEach(function(x){
+    if(x.severity==="high") high++;
+    if(review[x.id]){
+      seen++;
+      if(x.severity==="high") highSeen++;
+      if(review[x.id]==="flag") flagged++;
+    }
+  });
+  var complete=high>0&&highSeen===high;
+  return '<div style="padding:13px 14px;border-bottom:1px solid var(--color-divider);'+
+    'display:flex;gap:22px;flex-wrap:wrap;align-items:baseline">'+
+    '<div><div class="mi" style="margin-bottom:3px">Reviewed by</div>'+
+    '<div style="font-size:12.5px">'+(reviewer?esc(reviewer):'<span class="dim">nobody signed this</span>')+"</div></div>"+
+    '<div><div class="mi" style="margin-bottom:3px">Coverage</div>'+
+    '<div class="mo" style="font-size:11px">'+seen+" of "+list.length+" findings · "+
+    highSeen+" of "+high+" high"+
+    (complete?' <span style="background:var(--color-accent-200);padding:0 3px">complete</span>':"")+
+    "</div></div>"+
+    (flagged?'<div><div class="mi" style="margin-bottom:3px">Flagged for fixing</div>'+
+      '<div class="mo" style="font-size:11px">'+flagged+"</div></div>":"")+
+    "</div>";
+}
+
 /* 1n — the same viewer as a static file: no scripting needed to read it. */
 function report(f){
   var c={high:0,medium:0,low:0};
@@ -1939,7 +2036,13 @@ function report(f){
       '<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">'+
       '<span class="sv sv-'+x.severity+'">'+x.severity.toUpperCase()+"</span>"+
       '<span class="fi-r">'+esc(x.sheet+(x.ref?"!"+x.ref:""))+"</span>"+
-      '<span style="font-size:11.5px">'+esc(x.summary)+"</span></div>"+
+      '<span style="font-size:11.5px">'+esc(x.summary)+"</span>"+
+      (review[x.id]==="flag"
+        ? '<span class="sv sv-high" style="margin-left:auto">NEEDS FIXING</span>'
+        : review[x.id]==="ok"
+        ? '<span class="mo" style="margin-left:auto;font-size:10px;color:var(--color-accent-700)">✓ reviewed</span>'
+        : '<span class="mo dim" style="margin-left:auto;font-size:10px">not reviewed</span>')+
+      "</div>"+
       (x.detail?'<div class="fi-d dim">'+esc(x.detail)+"</div>":"")+
       (d?'<div style="display:flex;flex-direction:column;gap:4px">'+d+"</div>":"")+
       ((x.valBefore||x.valAfter)?'<div class="mo dim" style="font-size:10px">value '+
@@ -1966,6 +2069,7 @@ function report(f){
       '<div class="mo dim" style="font-size:10px;margin-top:3px">'+
       c.high+" high · "+c.medium+" medium · "+c.low+" low · alignment confidence "+conf.toFixed(2)+
       "<br>One file. No assets, no network, no JavaScript required to read it.</div></div>"+
+    signoff(f)+
     rows+"</div></div></body></html>";
 }
 
