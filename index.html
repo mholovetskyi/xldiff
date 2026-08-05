@@ -36,6 +36,25 @@
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;background:var(--color-bg);color:var(--color-text);
   font-family:var(--font-body);font-size:15px;line-height:1.55}
+
+/* Sky, on the landing only. The point it makes is the product's one claim:
+   this runs where you are. It fades out well before the bottom, and is gone
+   entirely once files are loaded — the review surface is somewhere people
+   stare for an hour, and it stays neutral so the accent colour means
+   something when it appears. Fixed attachment so the gradient is measured
+   against the window rather than the scroll height. */
+body.landing{
+  background:
+    linear-gradient(180deg,
+      #9cc6ea 0%,
+      #b8d7ef 16%,
+      #d2e4f4 34%,
+      #e6eef6 54%,
+      var(--color-bg) 74%);
+  background-attachment:fixed;
+}
+body.landing .wf{background:#fbfcfe;
+  box-shadow:0 20px 50px -26px color-mix(in srgb,#1d2d3d 60%,transparent)}
 :focus{outline:none}
 :focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
 ::selection{background:color-mix(in srgb,var(--color-accent) 30%,transparent)}
@@ -102,9 +121,9 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);
 .fchip i{width:5px;height:5px;background:var(--color-accent);flex:none}
 
 /* — verdict header (1a) — */
-.verdict{padding:20px 22px 18px;border-bottom:1px solid var(--color-divider)}
+.verdict{padding:14px 22px 12px;border-bottom:1px solid var(--color-divider)}
 .verdict .hl{font-family:var(--font-heading);font-weight:600;font-size:29px;
-  line-height:1.1;letter-spacing:.01em;margin:7px 0 8px}
+  line-height:1.1;letter-spacing:.01em;margin:4px 0 6px}
 .verdict .counts{font-family:var(--font-mono);font-size:11px;
   color:color-mix(in srgb,var(--color-text) 55%,transparent)}
 
@@ -167,23 +186,43 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);
 .warn .sv{background:var(--color-bg);color:var(--color-accent-900)}
 
 /* — layout — */
-.page{max-width:1440px;margin:0 auto;padding:34px 30px 60px}
+/* The review surface fills the window. The panes used to be capped at a fixed
+   height, so on anything taller than a laptop the app sat in a band across the
+   middle with the rest of the screen empty — while the grids it was showing
+   scrolled internally against that cap. Every ancestor of a scrolling pane
+   needs min-height:0, or flexbox refuses to let it shrink below its content
+   and the overflow lands on the page instead. */
+.page{max-width:1440px;margin:0 auto;padding:34px 30px 26px;
+  min-height:100vh;display:flex;flex-direction:column}
+body.landing .page{justify-content:center}
+/* The review surface needs a definite height, not a floor: min-height alone
+   lets the flex children grow to fit their content, which puts a 3,800px grid
+   on the page and scrolls the whole document instead of the pane. The landing
+   keeps min-height so a short window scrolls rather than clipping the card. */
+body:not(.landing) .page{height:100vh}
+#review{flex:1;display:flex;flex-direction:column;min-height:0}
+#review>.wf{flex:1;min-height:0}
 .wf{background:var(--color-bg);display:flex;flex-direction:column}
-.split{display:flex;align-items:stretch;min-height:392px}
+.split{display:flex;align-items:stretch;flex:1;min-height:392px}
 .flist{width:296px;flex:none;border-right:1px solid var(--color-divider);
-  display:flex;flex-direction:column;max-height:560px}
+  display:flex;flex-direction:column;min-height:0}
 .flist-h{padding:9px 12px;border-bottom:1px solid var(--color-divider);
   display:flex;align-items:center;gap:8px;flex:none}
 .flist-b{overflow-y:auto}
-.panes{flex:1;display:flex;flex-direction:column;min-width:0}
-.paner{display:flex;align-items:stretch;flex:1;min-width:0}
-.pane{flex:1;min-width:0;display:flex;flex-direction:column}
+.panes{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.paner{display:flex;align-items:stretch;flex:1;min-width:0;min-height:0}
+.pane{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
 .pane+.pane{border-left:1px solid var(--color-divider)}
 .pane-h{padding:7px 10px;border-bottom:1px solid var(--color-divider);
   display:flex;gap:8px;align-items:baseline;flex:none}
-.pane-b{overflow:auto;max-height:430px}
+.pane-b{overflow:auto;flex:1;min-height:0}
 .strip{border-top:1px solid var(--color-divider);padding:11px 14px;
-  display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap}
+  display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;flex:none;
+  max-height:min(236px,40%);overflow-y:auto}
+/* The grids are the thing being read. Whatever is left after the detail strip
+   goes to them, but never less than this, or a short window leaves two rows
+   visible and the panes stop being worth looking at. */
+.paner{min-height:150px}
 
 /* — landing (1g) — */
 .drops{display:flex;gap:14px}
@@ -210,7 +249,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);
 details>summary{cursor:pointer;font-size:10.5px;font-family:var(--font-mono);
   color:var(--color-accent-700);list-style:none}
 details>summary::-webkit-details-marker{display:none}
-</style></head><body>
+</style></head><body class="landing">
 <div class="page">
 
 <!-- ══ 1g · landing / drop zone ══════════════════════════════════════════ -->
@@ -302,7 +341,7 @@ details>summary::-webkit-details-marker{display:none}
       </div>
     </div>
   </div>
-  <p class="mo dim" style="font-size:11px;margin-top:22px">Findings are ordered by severity, then position. Selecting one moves both panes to it.</p>
+  <p class="mo dim" style="font-size:11px;margin:11px 0 0">Findings are ordered by severity, then by how far they move an output. Selecting one moves both panes to it.</p>
 </div>
 
 <!-- ══ 1l · export ════════════════════════════════════════════════════════ -->
@@ -1299,6 +1338,7 @@ $("rerun").onclick=function(){
     $("file"+s).value="";});
   $("go").disabled=true; $("go").textContent="Compare";
   $("review").hidden=true; $("setup").hidden=false;
+  document.body.classList.add("landing");
 };
 
 /* ── formula tokenising and diff (1o) ────────────────────────────────── */
@@ -1846,6 +1886,7 @@ function show(){
   f.forEach(function(x,i){ if(first<0&&x.severity==="high"&&x.ref) first=i; });
 
   $("setup").hidden=true; $("review").hidden=false;
+  document.body.classList.remove("landing");
   warnband(); verdict(); ribbon(); grid(); list(); strip();
   if(first>=0) select(first);
   $("go").disabled=false; $("go").textContent="Compare";
