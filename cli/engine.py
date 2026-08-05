@@ -105,6 +105,11 @@ class Cell:
         return self.formula is None and self.value is None
 
 
+def cell_label(cell):
+    """(sheet, row, col) as the reference a reader would type."""
+    return "%s!%s%d" % (cell[0], get_column_letter(cell[2]), cell[1])
+
+
 @dataclass
 class Finding:
     severity: str
@@ -120,6 +125,8 @@ class Finding:
     magnitude: float = 0.0
     row_left: int = 0
     row_right: int = 0
+    chain: list = field(default_factory=list)
+    downstream: int = 0
 
     SEV_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -364,6 +371,98 @@ def run_context(grid, row, col):
         if expected is not None:
             return expected, axis
     return None, None
+
+
+_PREC = re.compile(
+    r"(?:(?:'(?P<q>[^']+)'|(?P<s>[A-Za-z_][A-Za-z0-9_.]*))!)?"
+    r"(?<![A-Za-z0-9_.])\$?(?P<c1>[A-Z]{1,3})\$?(?P<r1>[1-9][0-9]{0,6})"
+    r"(?::\$?(?P<c2>[A-Z]{1,3})\$?(?P<r2>[1-9][0-9]{0,6}))?"
+    r"(?![0-9(])")
+
+RANGE_CAP = 400
+
+
+def precedents(formula, sheet, names=None):
+    """Cells a formula reads, as (sheet, row, col), ranges expanded.
+
+    Enough to answer "what does this feed", which is the question the impact
+    findings could not answer before: they said a value moved, never what moved
+    it. Not a parser -- array formulas, structured table references and
+    INDIRECT are all invisible here, and a missed edge only ever shortens a
+    chain rather than inventing one.
+    """
+    if not isinstance(formula, str) or not formula.startswith("="):
+        return []
+    body = _QUOTED.sub("", formula)
+    out, total = [], 0
+    if names:
+        for n, target in names.items():
+            pat = r"(?<![A-Za-z0-9_.])%s(?![A-Za-z0-9_.])" % re.escape(n)
+            if re.search(pat, body, re.I):
+                out.extend(precedents("=" + target, sheet))
+                # Blank the token out. A name shaped like a reference -- TAX1 --
+                # would otherwise also be read as cell TAX1, inventing an edge
+                # to a cell 13,570 columns out.
+                body = re.sub(pat, " ", body, flags=re.I)
+    for m in _PREC.finditer(body):
+        where = m.group("q") or m.group("s") or sheet
+        r1, c1 = int(m.group("r1")), col_to_num(m.group("c1"))
+        if m.group("r2"):
+            r2, c2 = int(m.group("r2")), col_to_num(m.group("c2"))
+        else:
+            r2, c2 = r1, c1
+        rlo, rhi = min(r1, r2), max(r1, r2)
+        clo, chi = min(c1, c2), max(c1, c2)
+        if (rhi - rlo + 1) * (chi - clo + 1) > RANGE_CAP:
+            continue
+        for r in range(rlo, rhi + 1):
+            for c in range(clo, chi + 1):
+                out.append((where, r, c))
+                total += 1
+                if total > RANGE_CAP * 4:
+                    return out
+    return out
+
+
+def build_graph(grids, names):
+    """Reverse dependency map: a cell -> the cells that read it."""
+    dependents = {}
+    for sname, g in grids.items():
+        for (r, c), cell in g.cells.items():
+            if not cell.is_formula:
+                continue
+            for p in set(precedents(cell.formula, sname, names)):
+                dependents.setdefault(p, set()).add((sname, r, c))
+    return dict((k, sorted(v)) for k, v in dependents.items())
+
+
+def trace(start, dependents, moved, limit=2000):
+    """Breadth-first walk downstream of a cell.
+
+    Returns how many cells it feeds and the path to the furthest one whose
+    value actually moved -- the difference between "this cell changed" and
+    "this cell changed, and here is the number it landed on".
+    """
+    parent = {start: None}
+    order = [start]
+    i = 0
+    while i < len(order) and len(order) < limit:
+        for nxt in dependents.get(order[i], ()):
+            if nxt not in parent:
+                parent[nxt] = order[i]
+                order.append(nxt)
+        i += 1
+    target = None
+    for cell in reversed(order[1:]):
+        if cell in moved:
+            target = cell
+            break
+    path = []
+    while target is not None:
+        path.append(target)
+        target = parent[target]
+    path.reverse()
+    return len(order) - 1, path
 
 
 _ERROR = re.compile(r'#(REF!|DIV/0!|VALUE!|NAME\?|N/A|NULL!|NUM!|SPILL!|CALC!)')
@@ -625,6 +724,33 @@ def diff_names(names_a, names_b, findings):
                 before=names_a[n], after=names_b[n]))
 
 
+_CELLREF = re.compile(r'^([A-Z]{1,3})([1-9][0-9]{0,6})$')
+
+
+def attach_chains(findings, right, names_b, align):
+    """Give every cell finding the path from it to the number it moved.
+
+    Impact findings already said a value moved with no edit to the cell. The
+    graph is what turns that into a cause: the same edit, traced forward, ends
+    on the output someone is about to read out loud.
+    """
+    graph = build_graph(right, names_b)
+    moved = set()
+    for f in findings:
+        m = _CELLREF.match(f.ref or "")
+        if m and f.val_before != f.val_after:
+            moved.add((f.sheet, int(m.group(2)), col_to_num(m.group(1))))
+
+    for f in findings:
+        m = _CELLREF.match(f.ref or "")
+        if not m or f.kind == "impact":
+            continue
+        start = (f.sheet, int(m.group(2)), col_to_num(m.group(1)))
+        count, path = trace(start, graph, moved)
+        f.downstream = count
+        f.chain = [cell_label(c) for c in path]
+
+
 def compare(path_a, path_b):
     left, stale_a, names_a = read_workbook(path_a)
     right, stale_b, names_b = read_workbook(path_b)
@@ -655,6 +781,8 @@ def compare(path_a, path_b):
             "low", "impact_capped", "", "",
             "%d further cells moved in value with no edit" % suppressed,
             "Showing the %d largest by relative change." % IMPACT_CAP))
+
+    attach_chains(findings, right, names_b, align)
 
     findings.sort(key=lambda f: f.sort_key())
     return {

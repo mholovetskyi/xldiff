@@ -813,10 +813,23 @@ function strip(){
     h+=esc(f.summary)+(f.detail?" "+esc(f.detail):"");
     if(ra) h+=" Row run "+esc(ra.range)+" — "+ra.agree+" of "+(ra.total-1)+
       " neighbours identical.";
+    if(f.downstream) h+=" Feeds "+f.downstream+" cell"+(f.downstream===1?"":"s")+".";
   }else{
     h+='<span class="dim">No finding on this cell. It is shown for context.</span>';
   }
-  h+="</div></div>";
+  h+="</div>";
+  /* The chain is the answer to "so what". Impact findings say a value moved;
+     this says which edit moved it and where it landed. */
+  if(f&&f.chain&&f.chain.length>1){
+    h+='<div class="mi" style="margin:9px 0 5px">Moves</div><div class="mo" style="font-size:10px;line-height:1.7">';
+    h+=f.chain.map(function(step,i){
+      return (i?'<span class="dim"> → </span>':"")+
+        '<span'+(i===f.chain.length-1?' style="background:var(--color-accent-200);padding:0 3px"':"")+
+        ">"+esc(step)+"</span>";
+    }).join("");
+    h+="</div>";
+  }
+  h+="</div>";
 
   if(f){
     h+='<div style="width:186px;flex:none"><div class="mi" style="margin-bottom:7px">Value</div>'+

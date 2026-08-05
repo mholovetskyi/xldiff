@@ -20,6 +20,7 @@ process.stdout.write(JSON.stringify({
     severity: f.severity, kind: f.kind, sheet: f.sheet, ref: f.ref,
     summary: f.summary, detail: f.detail,
     before: f.before, after: f.after,
-    valBefore: f.valBefore, valAfter: f.valAfter
+    valBefore: f.valBefore, valAfter: f.valAfter,
+    chain: f.chain, downstream: f.downstream
   }))
 }, null, 1));

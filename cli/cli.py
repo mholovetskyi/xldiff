@@ -60,6 +60,9 @@ def main(argv=None):
             if f.val_before != f.val_after and (f.val_before or f.val_after):
                 print("%s %-22s   value %s -> %s"
                       % (" " * 6, "", f.val_before, f.val_after))
+            if len(f.chain) > 1:
+                print("%s %-22s   moves %s"
+                      % (" " * 6, "", "  ->  ".join(f.chain[1:])))
         if len(findings) > 40:
             print("... %d more, see the report" % (len(findings) - 40))
 
@@ -73,8 +76,9 @@ def main(argv=None):
             "summary": f.summary, "detail": f.detail,
             "before": f.before, "after": f.after,
             "value_before": f.val_before, "value_after": f.val_after,
+            "chain": f.chain, "downstream": f.downstream,
         } for f in findings]
-        with open(a.json_out, "w") as fh:
+        with open(a.json_out, "w", encoding="utf-8") as fh:
             json.dump({"findings": payload, "stale_values": result["stale"]},
                       fh, indent=2)
 

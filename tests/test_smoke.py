@@ -11,7 +11,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "cli"))
 
-from engine import compare, to_r1c1  # noqa: E402
+from engine import compare, to_r1c1, precedents  # noqa: E402
 
 A = os.path.join(ROOT, "examples", "model_v14.xlsx")
 B = os.path.join(ROOT, "examples", "model_v15.xlsx")
@@ -76,6 +76,29 @@ def main():
         ("high", "sheet_deleted", "Prior year", ""),
     ]:
         check(exp in got, "%s %s at %s!%s" % exp)
+
+    print("dependency chains")
+    check(precedents("='Revenue build'!B9*1.5", "Sensitivity") == [("Revenue build", 9, 2)],
+          "a cross-sheet reference resolves to the sheet it names")
+    check(len(precedents("=SUM(B4:B6)", "S")) == 3, "a range expands to the cells it covers")
+    check(precedents("=LOG10(B4)", "S") == [("S", 4, 2)],
+          "a function name that looks like a reference is not one")
+    named = precedents("=B7*TAX1", "Costs", {"TAX1": "'Revenue build'!$B$24"})
+    check(("Revenue build", 24, 2) in named, "a name resolves to what it points at")
+    check(all(c[2] < 100 for c in named),
+          "and is not also read as a cell 13,570 columns out")
+
+    growth = [f for f in sample["findings"]
+              if f.sheet == "Revenue build" and f.ref == "B4"][0]
+    check(growth.downstream >= 8,
+          "the growth rate is known to feed %d cells" % growth.downstream)
+    check(growth.chain and growth.chain[0] == "Revenue build!B4",
+          "its chain starts at the cell that changed")
+    check(len(growth.chain) >= 3,
+          "and runs forward to a number that moved: %s" % " -> ".join(growth.chain))
+    impacts = [f for f in sample["findings"] if f.kind == "impact"]
+    check(all(not f.chain for f in impacts),
+          "impact findings carry no chain: they are the far end of someone else's")
 
     print("defined names")
     kinds = dict((f.kind, f) for f in sample["findings"])

@@ -285,6 +285,119 @@ function runContext(grid, row, col) {
   return { expected: null, axis: null };
 }
 
+var PREC = new RegExp(
+  "(?:(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_.]*))!)?" +
+  "\\$?([A-Z]{1,3})\\$?([1-9][0-9]{0,6})" +
+  "(?::\\$?([A-Z]{1,3})\\$?([1-9][0-9]{0,6}))?" +
+  "(?![0-9(])", "g");
+var RANGE_CAP = 400;
+/* Cell keys join sheet, row and column with a character that cannot appear
+   in a sheet name. Without a separator, row 4 column 2 and row 42 column 1
+   produce the same key. */
+var SEP = "\u0001";
+
+/* Cells a formula reads, as "sheet\u0001row\u0001col", ranges expanded. Enough to
+   answer "what does this feed", which is the question the impact findings
+   could not answer before: they said a value moved, never what moved it. Not a
+   parser — array formulas, structured table references and INDIRECT are all
+   invisible here, and a missed edge only ever shortens a chain rather than
+   inventing one. */
+function precedents(formula, sheet, names) {
+  if (typeof formula !== "string" || formula.charAt(0) !== "=") return [];
+  var body = formula.replace(QUOTED, ""), out = [], total = 0, n;
+  if (names) {
+    for (n in names) {
+      var pat = new RegExp("(^|[^A-Za-z0-9_.])" + n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+        "(?![A-Za-z0-9_.])", "gi");
+      if (pat.test(body)) {
+        out = out.concat(precedents("=" + names[n], sheet));
+        /* Blank the token out. A name shaped like a reference — TAX1 — would
+           otherwise also be read as cell TAX1, inventing an edge to a cell
+           13,570 columns out. */
+        body = body.replace(pat, "$1 ");
+      }
+    }
+  }
+  var m;
+  PREC.lastIndex = 0;
+  while ((m = PREC.exec(body)) !== null) {
+    if (m.index === PREC.lastIndex) PREC.lastIndex++;
+    var pre = m.index ? body.charAt(m.index - 1) : "";
+    if (!m[1] && !m[2] && /[A-Za-z0-9_.]/.test(pre)) continue;
+    var where = m[1] || m[2] || sheet;
+    var r1 = parseInt(m[4], 10), c1 = colToNum(m[3]);
+    var r2 = m[6] ? parseInt(m[6], 10) : r1, c2 = m[5] ? colToNum(m[5]) : c1;
+    var rlo = Math.min(r1, r2), rhi = Math.max(r1, r2);
+    var clo = Math.min(c1, c2), chi = Math.max(c1, c2);
+    if ((rhi - rlo + 1) * (chi - clo + 1) > RANGE_CAP) continue;
+    for (var r = rlo; r <= rhi; r++)
+      for (var c = clo; c <= chi; c++) {
+        out.push(where + SEP + r + SEP + c);
+        if (++total > RANGE_CAP * 4) return out;
+      }
+  }
+  return out;
+}
+
+/* Reverse dependency map: a cell -> the cells that read it. */
+function buildGraph(grids, names) {
+  var dependents = {};
+  for (var sname in grids) {
+    var g = grids[sname];
+    for (var k in g.cells) {
+      var cell = g.cells[k];
+      if (!isFormula(cell)) continue;
+      var parts = k.split(":");
+      var self = sname + SEP + parts[0] + SEP + parts[1];
+      var ps = precedents(cell.f, sname, names), seen = {};
+      for (var i = 0; i < ps.length; i++) {
+        if (seen[ps[i]]) continue;
+        seen[ps[i]] = 1;
+        (dependents[ps[i]] = dependents[ps[i]] || []).push(self);
+      }
+    }
+  }
+  for (var key in dependents) dependents[key].sort(cellOrder);
+  return dependents;
+}
+
+/* Sheet, then row, then column — the same order the Python engine sorts
+   tuples in, so both walk the graph identically. */
+function cellOrder(a, b) {
+  var x = a.split(SEP), y = b.split(SEP);
+  if (x[0] !== y[0]) return x[0] < y[0] ? -1 : 1;
+  if (+x[1] !== +y[1]) return +x[1] - +y[1];
+  return +x[2] - +y[2];
+}
+
+/* Breadth-first walk downstream of a cell. Returns how many cells it feeds and
+   the path to the furthest one whose value actually moved — the difference
+   between "this cell changed" and "this cell changed, and here is the number
+   it landed on". */
+function trace(start, dependents, moved, limit) {
+  var parent = {}, order = [start], i = 0;
+  parent[start] = null;
+  limit = limit || 2000;
+  while (i < order.length && order.length < limit) {
+    var nb = dependents[order[i]] || [];
+    for (var j = 0; j < nb.length; j++)
+      if (!(nb[j] in parent)) { parent[nb[j]] = order[i]; order.push(nb[j]); }
+    i++;
+  }
+  var target = null;
+  for (var k = order.length - 1; k >= 1; k--)
+    if (moved[order[k]]) { target = order[k]; break; }
+  var path = [];
+  while (target !== null && target !== undefined) { path.push(target); target = parent[target]; }
+  path.reverse();
+  return { count: order.length - 1, path: path };
+}
+
+function cellLabel(key) {
+  var p = key.split(SEP);
+  return p[0] + "!" + colLetter(+p[2]) + p[1];
+}
+
 var ERROR = /^#(REF!|DIV\/0!|VALUE!|NAME\?|N\/A|NULL!|NUM!|SPILL!|CALC!)$/;
 
 /* The Excel error a cached value carries, or null if it holds a result. */
@@ -338,8 +451,32 @@ function F(sev, kind, sheet, ref, summary, o) {
     severity: sev, kind: kind, sheet: sheet, ref: ref, summary: summary,
     detail: o.detail || "", before: o.before || "", after: o.after || "",
     valBefore: o.vb || "", valAfter: o.va || "", magnitude: o.mag || 0,
-    rowLeft: o.lr || 0, rowRight: o.rr || 0
+    rowLeft: o.lr || 0, rowRight: o.rr || 0,
+    chain: [], downstream: 0
   };
+}
+
+var CELLREF = /^([A-Z]{1,3})([1-9][0-9]{0,6})$/;
+
+/* Give every cell finding the path from it to the number it moved. Impact
+   findings already said a value moved with no edit to the cell. The graph is
+   what turns that into a cause: the same edit, traced forward, ends on the
+   output someone is about to read out loud. */
+function attachChains(findings, right, namesB) {
+  var graph = buildGraph(right, namesB), moved = {}, i, m;
+  for (i = 0; i < findings.length; i++) {
+    m = CELLREF.exec(findings[i].ref || "");
+    if (m && findings[i].valBefore !== findings[i].valAfter)
+      moved[findings[i].sheet + SEP + parseInt(m[2], 10) + SEP + colToNum(m[1])] = 1;
+  }
+  for (i = 0; i < findings.length; i++) {
+    var f = findings[i];
+    m = CELLREF.exec(f.ref || "");
+    if (!m || f.kind === "impact") continue;
+    var r = trace(f.sheet + SEP + parseInt(m[2], 10) + SEP + colToNum(m[1]), graph, moved);
+    f.downstream = r.count;
+    f.chain = r.path.map(cellLabel);
+  }
 }
 
 function diffSheet(name, left, right, findings, align) {
@@ -528,6 +665,8 @@ function compare(wbA, wbB) {
       { detail: "Showing the " + IMPACT_CAP + " largest by relative change." }));
   }
 
+  attachChains(findings, right, namesB);
+
   findings.sort(function (a, b) {
     return (SEV_ORDER[a.severity] - SEV_ORDER[b.severity]) ||
       (a.sheet < b.sheet ? -1 : a.sheet > b.sheet ? 1 : 0) ||
@@ -538,6 +677,7 @@ function compare(wbA, wbB) {
     names: [namesA, namesB] };
 }
 
-root.xldiff = { compare: compare, toR1C1: toR1C1, fmt: fmt, colLetter: colLetter, get: get };
+root.xldiff = { compare: compare, toR1C1: toR1C1, fmt: fmt, colLetter: colLetter,
+  get: get, precedents: precedents, SEP: SEP };
 
 })(typeof module !== "undefined" && module.exports ? module.exports : (typeof window !== "undefined" ? window : this));

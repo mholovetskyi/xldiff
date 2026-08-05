@@ -54,6 +54,7 @@ def py_findings(a, b):
             "summary": f.summary, "detail": f.detail,
             "before": f.before, "after": f.after,
             "valBefore": f.val_before, "valAfter": f.val_after,
+            "chain": f.chain, "downstream": f.downstream,
         } for f in r["findings"]],
     }
 

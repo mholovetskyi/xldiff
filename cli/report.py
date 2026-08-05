@@ -112,7 +112,9 @@ def render(result, out_path):
         "fileB": os.path.basename(result["files"][1]),
     }
 
-    with open(out_path, "w") as fh:
+    # Explicit UTF-8: the template carries characters the Windows locale codec
+    # cannot encode, so the default would crash rather than write a report.
+    with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(TEMPLATE.replace("__DATA__", json.dumps(data)))
     return out_path
 

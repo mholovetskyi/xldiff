@@ -55,6 +55,29 @@ const sgot = new Set(s.findings.map(key));
   "high|sheet_deleted|Prior year|"
 ].forEach((k) => check(sgot.has(k), k.replace(/\|/g, " ")));
 
+console.log("dependency chains");
+const P = (f, sheet, names) => xldiff.precedents(f, sheet, names)
+  .map((k) => k.split(xldiff.SEP).join("!"));
+check(String(P("='Revenue build'!B9*1.5", "Sensitivity")) === "Revenue build!9!2",
+  "a cross-sheet reference resolves to the sheet it names");
+check(P("=SUM(B4:B6)", "S").length === 3, "a range expands to the cells it covers");
+check(String(P("=LOG10(B4)", "S")) === "S!4!2",
+  "a function name that looks like a reference is not one");
+const namedP = P("=B7*TAX1", "Costs", { TAX1: "'Revenue build'!$B$24" });
+check(namedP.indexOf("Revenue build!24!2") !== -1, "a name resolves to what it points at");
+check(namedP.every((k) => +k.split("!").pop() < 100),
+  "and is not also read as a cell 13,570 columns out");
+
+const growth = s.findings.find((f) => f.sheet === "Revenue build" && f.ref === "B4");
+check(growth.downstream >= 8,
+  "the growth rate is known to feed " + growth.downstream + " cells");
+check(growth.chain.length && growth.chain[0] === "Revenue build!B4",
+  "its chain starts at the cell that changed");
+check(growth.chain.length >= 3,
+  "and runs forward to a number that moved: " + growth.chain.join(" -> "));
+check(s.findings.filter((f) => f.kind === "impact").every((f) => !f.chain.length),
+  "impact findings carry no chain: they are the far end of someone else's");
+
 console.log("defined names");
 const byKind = {};
 s.findings.forEach((f) => { if (!byKind[f.kind]) byKind[f.kind] = f; });
