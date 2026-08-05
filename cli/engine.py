@@ -162,6 +162,21 @@ def read_workbook(path):
     return grids, stale
 
 
+def _collapse(shape):
+    """Run-length normalise a shape string: "tnnnn" and "tnnnnn" both read "tn".
+
+    The fingerprint records the pattern of cell kinds along the row, not how
+    many columns each run happens to span. Without this an inserted column
+    changes the shape of every row at once and row alignment collapses, so the
+    two axes would each need the other to have been solved first.
+    """
+    out = []
+    for ch in shape:
+        if not out or out[-1] != ch:
+            out.append(ch)
+    return "".join(out)
+
+
 def row_signature(grid, row):
     """Coarse fingerprint for alignment: label text plus a shape string.
 
@@ -183,13 +198,16 @@ def row_signature(grid, row):
                 label = cell.formula.strip()[:40]
         else:
             shape.append("n")
-    return "%s|%s" % (label.lower(), "".join(shape))
+    return "%s|%s" % (label.lower(), _collapse("".join(shape)))
 
 
-def align_rows(left, right):
-    """Sequence-align rows so an inserted row does not shift the whole diff."""
-    lsig = [row_signature(left, r) for r in range(1, left.max_row + 1)]
-    rsig = [row_signature(right, r) for r in range(1, right.max_row + 1)]
+def _align(lsig, rsig):
+    """LCS over two fingerprint sequences, as 1-based pairs plus the strays.
+
+    A run of mismatches is paired up positionally rather than reported as a
+    wholesale delete and insert, so a block that was edited in place still
+    lines up with its counterpart.
+    """
     sm = SequenceMatcher(None, lsig, rsig, autojunk=False)
     pairs, added, deleted = [], [], []
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
@@ -208,8 +226,49 @@ def align_rows(left, right):
             deleted.extend(range(i1 + 1, i2 + 1))
         elif tag == "insert":
             added.extend(range(j1 + 1, j2 + 1))
-    ratio = sm.ratio()
-    return pairs, added, deleted, ratio
+    return pairs, added, deleted, sm.ratio()
+
+
+def align_rows(left, right):
+    """Sequence-align rows so an inserted row does not shift the whole diff."""
+    lsig = [row_signature(left, r) for r in range(1, left.max_row + 1)]
+    rsig = [row_signature(right, r) for r in range(1, right.max_row + 1)]
+    return _align(lsig, rsig)
+
+
+def column_signature(grid, col, rows):
+    """Fingerprint for a column: its header text plus a shape string.
+
+    Read over the rows that already aligned, not over every row in the sheet.
+    A single inserted row would otherwise perturb every column signature at
+    once, and two sequences that share nothing align by position -- which is
+    exactly the over-reporting column alignment exists to prevent.
+    """
+    label = ""
+    shape = []
+    for r in rows:
+        cell = grid.cells.get((r, col))
+        if cell is None or cell.empty:
+            shape.append(".")
+            continue
+        if cell.is_formula:
+            shape.append("f")
+        elif isinstance(cell.formula, str):
+            shape.append("t")
+            if not label:
+                label = cell.formula.strip()[:40]
+        else:
+            shape.append("n")
+    return "%s|%s" % (label.lower(), "".join(shape))
+
+
+def align_columns(left, right, row_pairs):
+    """Sequence-align columns so an inserted column does not shift the diff."""
+    lrows = [lr for lr, _ in row_pairs]
+    rrows = [rr for _, rr in row_pairs]
+    lsig = [column_signature(left, c, lrows) for c in range(1, left.max_col + 1)]
+    rsig = [column_signature(right, c, rrows) for c in range(1, right.max_col + 1)]
+    return _align(lsig, rsig)
 
 
 def _walk(grid, row, col, dr, dc, limit=4):
@@ -336,9 +395,12 @@ def value_delta(lc, rc):
 
 def diff_sheet(name, left, right, findings, align_out=None):
     pairs, added, deleted, ratio = align_rows(left, right)
+    col_pairs, col_added, col_deleted, col_ratio = align_columns(left, right, pairs)
     if align_out is not None:
         align_out[name] = {"pairs": pairs, "added": added,
-                           "deleted": deleted, "ratio": ratio}
+                           "deleted": deleted, "ratio": ratio,
+                           "col_pairs": col_pairs, "col_added": col_added,
+                           "col_deleted": col_deleted, "col_ratio": col_ratio}
     if ratio < 0.35:
         findings.append(Finding(
             "low", "alignment", name, "",
@@ -360,12 +422,26 @@ def diff_sheet(name, left, right, findings, align_out=None):
             "Row deleted%s" % (": %s" % label if label else ""),
             row_left=r))
 
+    rrows = [rr for _, rr in pairs]
+    lrows = [lr for lr, _ in pairs]
+    for c in col_added:
+        label = column_signature(right, c, rrows).split("|")[0]
+        findings.append(Finding(
+            "low", "column_added", name, "column %s" % get_column_letter(c),
+            "Column inserted%s" % (": %s" % label if label else "")))
+    for c in col_deleted:
+        label = column_signature(left, c, lrows).split("|")[0]
+        findings.append(Finding(
+            "medium", "column_deleted", name, "column %s" % get_column_letter(c),
+            "Column deleted%s" % (": %s" % label if label else "")))
+
     for lr, rr in pairs:
-        cols = set(c for (row, c) in left.cells if row == lr)
-        cols |= set(c for (row, c) in right.cells if row == rr)
-        for c in sorted(cols):
-            lc, rc = left.get(lr, c), right.get(rr, c)
-            ref = "%s%d" % (get_column_letter(c), rr)
+        for lcol, rcol in col_pairs:
+            lc, rc = left.get(lr, lcol), right.get(rr, rcol)
+            if lc.empty and rc.empty:
+                continue
+            c = rcol
+            ref = "%s%d" % (get_column_letter(rcol), rr)
             same_logic = lc.r1c1 == rc.r1c1
             vb, va = fmt(lc.value), fmt(rc.value)
             mag = value_delta(lc, rc)
@@ -404,7 +480,7 @@ def diff_sheet(name, left, right, findings, align_out=None):
                 continue
 
             if lc.is_formula and not rc.is_formula:
-                expected, axis = run_context(right, rr, c)
+                expected, axis = run_context(right, rr, rcol)
                 findings.append(Finding(
                     "high", "hardcode", name, ref,
                     "Hardcode replaced a formula",
@@ -425,8 +501,8 @@ def diff_sheet(name, left, right, findings, align_out=None):
                 continue
 
             if lc.is_formula and rc.is_formula:
-                expected, axis = run_context(right, rr, c)
-                was_break, was_axis = run_context(left, lr, c)
+                expected, axis = run_context(right, rr, rcol)
+                was_break, was_axis = run_context(left, lr, lcol)
                 if expected is not None:
                     findings.append(Finding(
                         "high", "run_break", name, ref,

@@ -73,6 +73,22 @@ def main():
     ]:
         check(exp in got, "%s %s at %s!%s" % exp)
 
+    print("an inserted column does not shift the diff")
+    oc = [f for f in sample["findings"] if f.sheet == "Operating costs"]
+    check(any(f.kind == "column_added" and f.ref == "column B" for f in oc),
+          "the inserted column is reported once, by letter and header")
+    # Salaries, Rent and Software only moved one column right. Every one of
+    # those cells would report as edited without column alignment, which is
+    # the failure mode that made naive comparison tools unusable.
+    shifted = [f for f in oc if f.ref[1:] in ("4", "5", "7") and f.ref[:1].isalpha()]
+    check(not shifted,
+          "cells that only moved right report nothing (got %d)" % len(shifted))
+    ratios = sample["align"]["Operating costs"]
+    check(ratios["col_ratio"] > 0.9,
+          "column alignment confidence stays high (%.2f)" % ratios["col_ratio"])
+    check(ratios["ratio"] > 0.9,
+          "and inserting a column does not wreck row alignment (%.2f)" % ratios["ratio"])
+
     print("run breaks on both axes")
     check(("high", "run_break", "Revenue build", "B20") in got,
           "an overridden step mid-column is a vertical run break")

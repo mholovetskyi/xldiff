@@ -89,6 +89,18 @@ function readSheet(ws, name) {
 
 function get(grid, r, c) { return grid.cells[r + ":" + c] || EMPTY; }
 
+/* Run-length normalise a shape string: "tnnnn" and "tnnnnn" both read "tn".
+   The fingerprint records the pattern of cell kinds along the row, not how
+   many columns each run happens to span. Without this an inserted column
+   changes the shape of every row at once and row alignment collapses, so the
+   two axes would each need the other to have been solved first. */
+function collapse(shape) {
+  var out = "";
+  for (var i = 0; i < shape.length; i++)
+    if (shape.charAt(i) !== out.charAt(out.length - 1)) out += shape.charAt(i);
+  return out;
+}
+
 function rowSignature(grid, row) {
   var label = "", shape = "";
   for (var c = 1; c <= grid.maxCol; c++) {
@@ -100,7 +112,7 @@ function rowSignature(grid, row) {
       if (!label) label = cell.f.trim().slice(0, 40);
     } else shape += "n";
   }
-  return label.toLowerCase() + "|" + shape;
+  return label.toLowerCase() + "|" + collapse(shape);
 }
 
 /* LCS over row fingerprints, after stripping the common prefix and suffix. */
@@ -162,6 +174,34 @@ function alignRows(left, right) {
   var ls = [], rs = [];
   for (var r = 1; r <= left.maxRow; r++) ls.push(rowSignature(left, r));
   for (var r2 = 1; r2 <= right.maxRow; r2++) rs.push(rowSignature(right, r2));
+  return lcsOpcodes(ls, rs);
+}
+
+/* Fingerprint for a column: its header text plus a shape string, read over the
+   rows that already aligned rather than over every row in the sheet. A single
+   inserted row would otherwise perturb every column signature at once, and two
+   sequences that share nothing align by position — which is exactly the
+   over-reporting that column alignment exists to prevent. */
+function columnSignature(grid, col, rows) {
+  var label = "", shape = "";
+  for (var i = 0; i < rows.length; i++) {
+    var cell = grid.cells[rows[i] + ":" + col];
+    if (!cell || isEmpty(cell)) { shape += "."; continue; }
+    if (isFormula(cell)) shape += "f";
+    else if (typeof cell.f === "string") {
+      shape += "t";
+      if (!label) label = cell.f.trim().slice(0, 40);
+    } else shape += "n";
+  }
+  return label.toLowerCase() + "|" + shape;
+}
+
+function alignColumns(left, right, rowPairs) {
+  var lrows = rowPairs.map(function (p) { return p[0]; });
+  var rrows = rowPairs.map(function (p) { return p[1]; });
+  var ls = [], rs = [];
+  for (var c = 1; c <= left.maxCol; c++) ls.push(columnSignature(left, c, lrows));
+  for (var c2 = 1; c2 <= right.maxCol; c2++) rs.push(columnSignature(right, c2, rrows));
   return lcsOpcodes(ls, rs);
 }
 
@@ -273,6 +313,9 @@ function F(sev, kind, sheet, ref, summary, o) {
 
 function diffSheet(name, left, right, findings, align) {
   var al = alignRows(left, right);
+  var cal = alignColumns(left, right, al.pairs);
+  al.colPairs = cal.pairs; al.colAdded = cal.added;
+  al.colDeleted = cal.deleted; al.colRatio = cal.ratio;
   align[name] = al;
   if (al.ratio < 0.35)
     findings.push(F("low", "alignment", name, "",
@@ -290,13 +333,27 @@ function diffSheet(name, left, right, findings, align) {
       "Row deleted" + (label ? ": " + label : ""), { lr: r }));
   });
 
+  var lrows = al.pairs.map(function (p) { return p[0]; });
+  var rrows = al.pairs.map(function (p) { return p[1]; });
+  cal.added.forEach(function (c) {
+    var label = columnSignature(right, c, rrows).split("|")[0];
+    findings.push(F("low", "column_added", name, "column " + colLetter(c),
+      "Column inserted" + (label ? ": " + label : "")));
+  });
+  cal.deleted.forEach(function (c) {
+    var label = columnSignature(left, c, lrows).split("|")[0];
+    findings.push(F("medium", "column_deleted", name, "column " + colLetter(c),
+      "Column deleted" + (label ? ": " + label : "")));
+  });
+
   al.pairs.forEach(function (p) {
-    var lr = p[0], rr = p[1], cols = {};
-    for (var c = 1; c <= Math.max(left.maxCol, right.maxCol); c++)
-      if (left.cells[lr + ":" + c] || right.cells[rr + ":" + c]) cols[c] = 1;
-    Object.keys(cols).map(Number).sort(function (a, b) { return a - b; }).forEach(function (c) {
-      var lc = get(left, lr, c), rc = get(right, rr, c);
-      var ref = colLetter(c) + rr;
+    var lr = p[0], rr = p[1];
+    cal.pairs.forEach(function (cp) {
+      var lcol = cp[0], rcol = cp[1];
+      var lc = get(left, lr, lcol), rc = get(right, rr, rcol);
+      if (isEmpty(lc) && isEmpty(rc)) return;
+      var c = rcol;
+      var ref = colLetter(rcol) + rr;
       var vb = fmt(lc.v), va = fmt(rc.v), mag = valueDelta(lc.v, rc.v);
       var base = { vb: vb, va: va, mag: mag, lr: lr, rr: rr };
 
@@ -321,7 +378,7 @@ function diffSheet(name, left, right, findings, align) {
         return;
       }
       if (isFormula(lc) && !isFormula(rc)) {
-        var hc = runContext(right, rr, c);
+        var hc = runContext(right, rr, rcol);
         findings.push(F("high", "hardcode", name, ref, "Hardcode replaced a formula",
           Object.assign({
             detail: hc.expected ? "The " + hc.axis + " it sits in is still calculated."
@@ -337,7 +394,7 @@ function diffSheet(name, left, right, findings, align) {
         return;
       }
       if (isFormula(lc) && isFormula(rc)) {
-        var now = runContext(right, rr, c), was = runContext(left, lr, c);
+        var now = runContext(right, rr, rcol), was = runContext(left, lr, lcol);
         if (now.expected !== null) {
           findings.push(F("high", "run_break", name, ref,
             "Formula breaks the run in its " + now.axis,

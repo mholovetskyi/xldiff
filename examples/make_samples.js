@@ -140,30 +140,45 @@ function revenue(growth, opts) {
 }
 
 /* ── Operating costs ────────────────────────────────────────────────────
-   The revision inserts a Travel line, which shifts every row beneath it. */
-function costs(withTravel) {
-  const c = {
-    A1: "Operating costs",
-    A3: "Item", B3: "Q1", C3: "Q2", D3: "Q3", E3: "Q4",
-    A4: "Salaries", A5: "Rent"
-  };
+   The revision inserts a Travel line and a prior-year column, so this sheet
+   shifts on both axes at once. Nothing about the quarters actually changed:
+   without alignment on both axes every cell here reports as edited, which is
+   the failure mode the whole approach exists to avoid. */
+function costs(opts) {
+  const c = { A1: "Operating costs", A3: "Item", A4: "Salaries", A5: "Rent" };
   const SAL = [420, 430, 440, 450], RENT = [90, 90, 95, 95];
   const TRAVEL = [12, 14, 11, 16], SOFT = [60, 62, 64, 66];
+  const PRIOR = { sal: 400, rent: 85, travel: 9, soft: 55 };
 
   let row = 6;
-  if (withTravel) { c["A" + row] = "Travel"; row++; }
+  if (opts.withTravel) { c["A" + row] = "Travel"; row++; }
   const softRow = row;
   c["A" + softRow] = "Software";
   const totalRow = softRow + 1;
   c["A" + totalRow] = "Total";
 
+  /* The inserted column lands at B, pushing every quarter one to the right. */
+  let col = 2;
+  if (opts.withPriorYear) {
+    const P = COL(col);
+    c[P + "3"] = "FY prior";
+    c[P + "4"] = PRIOR.sal;
+    c[P + "5"] = PRIOR.rent;
+    if (opts.withTravel) c[P + "6"] = PRIOR.travel;
+    c[P + softRow] = PRIOR.soft;
+    const pt = PRIOR.sal + PRIOR.rent + PRIOR.soft + (opts.withTravel ? PRIOR.travel : 0);
+    c[P + totalRow] = ["SUM(" + P + "4:" + P + softRow + ")", pt];
+    col++;
+  }
+
   for (let i = 0; i < 4; i++) {
-    const L = COL(i + 2);
+    const L = COL(col + i);
+    c[L + "3"] = "Q" + (i + 1);
     c[L + "4"] = SAL[i];
     c[L + "5"] = RENT[i];
-    if (withTravel) c[L + "6"] = TRAVEL[i];
+    if (opts.withTravel) c[L + "6"] = TRAVEL[i];
     c[L + softRow] = SOFT[i];
-    const total = SAL[i] + RENT[i] + SOFT[i] + (withTravel ? TRAVEL[i] : 0);
+    const total = SAL[i] + RENT[i] + SOFT[i] + (opts.withTravel ? TRAVEL[i] : 0);
     c[L + totalRow] = ["SUM(" + L + "4:" + L + softRow + ")", total];
   }
   return c;
@@ -185,7 +200,7 @@ const priorYear = {
 const before = book([
   /* The baseline carries the Q4 exception that the revision repairs. */
   ["Revenue build", revenue(0.04, { q4Exception: true, discount: 0.9, cohorts: 4 })],
-  ["Operating costs", costs(false)],
+  ["Operating costs", costs({})],
   ["Prior year", priorYear]
 ]);
 
@@ -194,7 +209,7 @@ const after = book([
     bumpQ2: true, plugQ3: true, discount: 0.85, cohorts: 0, priorYearGone: true,
     overrideMonth: 20
   })],
-  ["Operating costs", costs(true)],
+  ["Operating costs", costs({ withTravel: true, withPriorYear: true })],
   ["Sensitivity", sensitivity]
 ]);
 

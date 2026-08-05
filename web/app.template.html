@@ -593,27 +593,46 @@ function buildHunks(name,left,right,sevByRef){
     if(flag) for(var j=Math.max(0,i-CONTEXT);j<Math.min(rows.length,i+CONTEXT+1);j++) hot[j]=1;
   });
 
-  var ncol=Math.min(Math.max(left.maxCol,right.maxCol),MAX_COLS)||1;
+  var cols=displayColumns(info,left,right).slice(0,MAX_COLS);
   var out=[],prev=null;
   Object.keys(hot).map(Number).sort(function(a,b){return a-b;}).forEach(function(i){
     var lr=rows[i][0], rr=rows[i][1];
     if(prev!==null&&i!==prev+1) out.push({gap:true});
     prev=i;
     var cells=[];
-    for(var c=1;c<=ncol;c++){
-      var lc=lr?xldiff.get(left,lr,c):null, rc=rr?xldiff.get(right,rr,c):null;
+    cols.forEach(function(cp){
+      var lc=(lr&&cp.l)?xldiff.get(left,lr,cp.l):null;
+      var rc=(rr&&cp.r)?xldiff.get(right,rr,cp.r):null;
       var lv=lc?lc.v:null, rv=rc?rc.v:null;
-      cells.push({c:xldiff.colLetter(c),
+      var ref=(rr&&cp.r)?xldiff.colLetter(cp.r)+rr:"";
+      cells.push({c:xldiff.colLetter(cp.r||cp.l),
         lf:lc?xldiff.fmt(lc.f):"", lv:lc?xldiff.fmt(lc.v):"",
         rf:rc?xldiff.fmt(rc.f):"", rv:rc?xldiff.fmt(rc.v):"",
         d:(typeof lv==="number"&&typeof rv==="number")?rv-lv:null,
         num:lc&&typeof lc.v==="number"||rc&&typeof rc.v==="number",
-        ref:rr?xldiff.colLetter(c)+rr:"",
-        sev:rr?(sev[xldiff.colLetter(c)+rr]||""):""});
-    }
+        ref:ref, gapL:!cp.l, gapR:!cp.r,
+        sev:ref?(sev[ref]||""):""});
+    });
     out.push({l:lr,r:rr,cells:cells,state:lr===null?"added":(rr===null?"deleted":"")});
   });
   return out;
+}
+
+/* Walk both column sequences together so an inserted column renders as a gap
+   on the baseline side rather than sliding every column after it out of step
+   with its counterpart. */
+function displayColumns(info,left,right){
+  var lmap={}, rmap={};
+  (info.colPairs||[]).forEach(function(p){ lmap[p[0]]=p[1]; rmap[p[1]]=p[0]; });
+  var out=[], li=1, ri=1, lmax=left.maxCol, rmax=right.maxCol, guard=0;
+  while((li<=lmax||ri<=rmax)&&guard++<200){
+    if(li<=lmax&&lmap[li]===undefined){ out.push({l:li,r:null}); li++; continue; }
+    if(ri<=rmax&&rmap[ri]===undefined){ out.push({l:null,r:ri}); ri++; continue; }
+    if(li<=lmax&&ri<=rmax&&lmap[li]===ri){ out.push({l:li,r:ri}); li++; ri++; continue; }
+    if(li<=lmax&&lmap[li]<ri){ li++; continue; }
+    ri++;
+  }
+  return out.length?out:[{l:1,r:1}];
 }
 
 function cellText(cell,side){
@@ -642,20 +661,28 @@ function grid(){
   if(layer==="impact") s.hunks.forEach(function(h){ if(!h.gap) h.cells.forEach(function(c){
     if(c.d!==null&&Math.abs(c.d)>peak) peak=Math.abs(c.d); });});
 
-  var ncol=s.hunks.length?s.hunks[0].cells.length:1;
+  var firstRow=s.hunks.find(function(x){return !x.gap;});
+  var ncol=firstRow?firstRow.cells.length:1;
   var tmpl="30px "+(ncol>1?"122px repeat("+(ncol-1)+",92px)":"122px");
 
   function render(side){
     var h='<div class="gr" style="grid-template-columns:'+tmpl+'">';
+    var head=s.hunks.length?s.hunks.find(function(x){return !x.gap;}):null;
     h+='<span class="gh"></span>';
-    for(var c=0;c<ncol;c++) h+='<span class="gh">'+xldiff.colLetter(c+1)+"</span>";
+    (head?head.cells:[]).forEach(function(cell){
+      /* A column present on only one side keeps its slot on the other, so the
+         two panes stay in step row for row and column for column. */
+      var missing=(side==="l"&&cell.gapL)||(side==="r"&&cell.gapR);
+      h+='<span class="gh'+(missing?" gap":"")+'">'+(missing?"":cell.c)+"</span>";
+    });
     s.hunks.forEach(function(hu,i){
       if(hu.gap){h+='<span class="elide">···</span>';return;}
       var rn=side==="l"?hu.l:hu.r;
       var absent=(side==="l"&&hu.state==="added")||(side==="r"&&hu.state==="deleted");
       h+='<span class="gh'+(absent?" gap":"")+'">'+(rn||"")+"</span>";
       hu.cells.forEach(function(cell){
-        if(absent){h+='<span class="gap"></span>';return;}
+        if(absent||(side==="l"&&cell.gapL)||(side==="r"&&cell.gapR)){
+          h+='<span class="gap"></span>';return;}
         var cls=[];
         if(cell.num||layer==="impact") cls.push("nu");
         if(sel&&sel.sheet===s.name&&sel.ref&&cell.ref===sel.ref) cls.push("sel");

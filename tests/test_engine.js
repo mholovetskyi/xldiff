@@ -55,6 +55,20 @@ const sgot = new Set(s.findings.map(key));
   "high|sheet_deleted|Prior year|"
 ].forEach((k) => check(sgot.has(k), k.replace(/\|/g, " ")));
 
+console.log("an inserted column does not shift the diff");
+const oc = s.findings.filter((f) => f.sheet === "Operating costs");
+check(oc.some((f) => f.kind === "column_added" && f.ref === "column B"),
+  "the inserted column is reported once, by letter and header");
+// Salaries, Rent and Software only moved one column right. Every one of those
+// cells would report as edited without column alignment.
+const shifted = oc.filter((f) => /^[A-Z][457]$/.test(f.ref));
+check(!shifted.length,
+  "cells that only moved right report nothing (got " + shifted.length + ")");
+check(s.align["Operating costs"].colRatio > 0.9,
+  "column alignment confidence stays high (" + s.align["Operating costs"].colRatio.toFixed(2) + ")");
+check(s.align["Operating costs"].ratio > 0.9,
+  "and inserting a column does not wreck row alignment");
+
 console.log("run breaks on both axes");
 check(sgot.has("high|run_break|Revenue build|B20"),
   "an overridden step mid-column is a vertical run break");
