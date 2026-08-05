@@ -400,6 +400,9 @@ function fmt(v) {
   return String(v);
 }
 
+var ERR_CODE = { 0: "#NULL!", 7: "#DIV/0!", 15: "#VALUE!", 23: "#REF!",
+  29: "#NAME?", 36: "#NUM!", 42: "#N/A", 43: "#GETTING_DATA" };
+
 function isFormula(cell) { return cell && typeof cell.f === "string" && cell.f.charAt(0) === "="; }
 function isEmpty(cell) { return !cell || (cell.f === null && cell.v === null); }
 var EMPTY = { f: null, v: null, r1c1: null };
@@ -415,8 +418,12 @@ function readSheet(ws, name) {
     if (r > MAX_ROW || c > MAX_COL) continue;
     var src = ws[key];
     if (src.f === undefined && src.v === undefined) continue;
-    var formula = src.f !== undefined ? "=" + src.f : (src.v !== undefined ? src.v : null);
-    var cell = { f: formula, v: src.v === undefined ? null : src.v, r1c1: null };
+    /* SheetJS hands back an error as a numeric code; openpyxl hands back the
+       text. Normalise to the text here so both engines see the same cell. */
+    var val = src.v === undefined ? null : src.v;
+    if (src.t === "e") val = typeof src.w === "string" ? src.w : (ERR_CODE[src.v] || "#N/A");
+    var formula = src.f !== undefined ? "=" + src.f : val;
+    var cell = { f: formula, v: val, r1c1: null };
     cell.r1c1 = isFormula(cell) ? toR1C1(formula, r, c) : formula;
     grid.cells[r + ":" + c] = cell;
     if (r > grid.maxRow) grid.maxRow = r;
@@ -516,6 +523,45 @@ function findRunBreak(grid, row, col) {
   return nb[0];
 }
 
+var ERROR = /^#(REF!|DIV\/0!|VALUE!|NAME\?|N\/A|NULL!|NUM!|SPILL!|CALC!)$/;
+
+/* The Excel error a cached value carries, or null if it holds a result. */
+function errorText(v) {
+  if (typeof v !== "string") return null;
+  var s = v.trim();
+  return ERROR.test(s) ? s : null;
+}
+/* A formula whose text has lost a reference reads #REF! literally. */
+function brokenRef(f) { return typeof f === "string" && f.indexOf("#REF!") !== -1; }
+
+/* Errors outrank every other reading of a cell. A formula that changed and a
+   formula that now returns #DIV/0! are the same edit, but only one of them is
+   worth waking someone for, so the error is what gets reported and the formula
+   change rides along in before/after. */
+function errorFinding(name, ref, lc, rc, base) {
+  var lb = brokenRef(lc.f), rb = brokenRef(rc.f);
+  if (rb && !lb)
+    return F("high", "broken_reference", name, ref,
+      "Formula lost a reference and now reads #REF!",
+      Object.assign({ detail: "Whatever this pointed at was deleted. The cell cannot recalculate.",
+        before: fmt(lc.f), after: fmt(rc.f) }, base));
+
+  var le = errorText(lc.v), re = errorText(rc.v);
+  if (re && !le)
+    return F("high", "error_introduced", name, ref,
+      "This cell now evaluates to " + re,
+      Object.assign({ detail: "It held a value in the baseline.",
+        before: fmt(lc.f), after: fmt(rc.f) }, base));
+  if (le && !re)
+    return F("low", "error_cleared", name, ref, "An error here was fixed",
+      Object.assign({ detail: "The baseline returned " + le + ".",
+        before: fmt(lc.f), after: fmt(rc.f) }, base));
+  if (lb && !rb)
+    return F("low", "error_cleared", name, ref, "A broken reference here was repaired",
+      Object.assign({ before: fmt(lc.f), after: fmt(rc.f) }, base));
+  return null;
+}
+
 function valueDelta(a, b) {
   if (typeof a === "number" && typeof b === "number") {
     if (a === b) return 0;
@@ -562,6 +608,9 @@ function diffSheet(name, left, right, findings, align) {
       var ref = colLetter(c) + rr;
       var vb = fmt(lc.v), va = fmt(rc.v), mag = valueDelta(lc.v, rc.v);
       var base = { vb: vb, va: va, mag: mag, lr: lr, rr: rr };
+
+      var err = errorFinding(name, ref, lc, rc, base);
+      if (err) { findings.push(err); return; }
 
       if (lc.r1c1 === rc.r1c1) {
         if (lc.v !== rc.v && !isEmpty(lc))

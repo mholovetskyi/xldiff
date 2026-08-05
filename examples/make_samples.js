@@ -20,8 +20,14 @@ const XLSX = require(path.join(ROOT, "web/node_modules/xlsx"));
 
 const COL = (n) => XLSX.utils.encode_col(n - 1);
 
-/* A sheet is described as a map of "A1" -> value, or -> [formula, cachedValue].
-   Formulas are written without the leading "=", as SheetJS expects. */
+/* SheetJS stores an error as a code, not its text. */
+const ERR = { "#NULL!": 0, "#DIV/0!": 7, "#VALUE!": 15, "#REF!": 23,
+  "#NAME?": 29, "#NUM!": 36, "#N/A": 42 };
+const err = (text, formula) => ({ error: text, f: formula });
+
+/* A sheet is described as a map of "A1" -> value, -> [formula, cachedValue],
+   or -> err("#DIV/0!", formula). Formulas are written without the leading "=",
+   as SheetJS expects. */
 function sheet(cells) {
   const ws = {};
   let maxR = 1, maxC = 1;
@@ -29,7 +35,8 @@ function sheet(cells) {
     const v = cells[ref];
     ws[ref] = Array.isArray(v)
       ? { t: "n", f: v[0], v: v[1] }
-      : (typeof v === "number" ? { t: "n", v: v } : { t: "s", v: String(v) });
+      : (v && v.error ? { t: "e", v: ERR[v.error], w: v.error, f: v.f }
+      : (typeof v === "number" ? { t: "n", v: v } : { t: "s", v: String(v) }));
     const a = XLSX.utils.decode_cell(ref);
     if (a.r + 1 > maxR) maxR = a.r + 1;
     if (a.c + 1 > maxC) maxC = a.c + 1;
@@ -62,8 +69,22 @@ function revenue(growth, opts) {
     A7: "Units",
     A8: "Price",
     A9: "Revenue",
-    A11: "Discounted revenue"
+    A11: "Discounted revenue",
+    A13: "Cohorts", B13: opts.cohorts,
+    A14: "Revenue per cohort",
+    A16: "Prior year revenue"
   };
+
+  /* Someone zeroes an input and the division below it blows up. */
+  c.B14 = opts.cohorts === 0
+    ? err("#DIV/0!", "B9/B13")
+    : ["B9/B13", null];  /* filled in once revenue is known */
+
+  /* The revised file drops the Prior year sheet, so this reference dies with
+     it — Excel rewrites the formula text itself, which is the tell. */
+  c.B16 = opts.priorYearGone
+    ? err("#REF!", "#REF!B9")
+    : ["'Prior year'!B9", 24000];
 
   const units = [], rev = [];
   for (let i = 0; i < 4; i++) {
@@ -101,6 +122,7 @@ function revenue(growth, opts) {
      change — and the new literal is what makes it high severity. */
   const disc = opts.discount;
   c.B11 = ["B9*" + disc, rev[0] * disc];
+  if (opts.cohorts) c.B14 = ["B9/B13", rev[0] / opts.cohorts];
   return c;
 }
 
@@ -142,19 +164,25 @@ const sensitivity = {
   A5: 0.06, B5: ["'Revenue build'!B9*1.5", 39750]
 };
 
+/* A sheet the revised file deletes, taking a reference down with it. */
+const priorYear = {
+  A1: "Prior year", A3: "Revenue", B9: 24000
+};
+
 const before = book([
-  ["Revenue build", revenue(0.04, { discount: 0.9 })],
-  ["Operating costs", costs(false)]
+  /* The baseline carries the Q4 exception that the revision repairs. */
+  ["Revenue build", revenue(0.04, { q4Exception: true, discount: 0.9, cohorts: 4 })],
+  ["Operating costs", costs(false)],
+  ["Prior year", priorYear]
 ]);
 
 const after = book([
-  ["Revenue build", revenue(0.06, { bumpQ2: true, q4Exception: false, plugQ3: true, discount: 0.85 })],
+  ["Revenue build", revenue(0.06, {
+    bumpQ2: true, plugQ3: true, discount: 0.85, cohorts: 0, priorYearGone: true
+  })],
   ["Operating costs", costs(true)],
   ["Sensitivity", sensitivity]
 ]);
-
-/* The baseline carries the Q4 exception that the revision repairs. */
-before.Sheets["Revenue build"] = sheet(revenue(0.04, { q4Exception: true, discount: 0.9 }));
 
 for (const [name, wb] of [["sample_before.xlsx", before], ["sample_after.xlsx", after]]) {
   const dest = path.join(__dirname, name);

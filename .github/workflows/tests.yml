@@ -16,6 +16,13 @@ jobs:
       - run: pip install -r cli/requirements.txt
       - name: Engine checks
         run: python tests/test_smoke.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+        working-directory: web
+      - name: The two engines agree finding for finding
+        run: python tests/test_parity.py
       - name: CLI runs end to end
         run: |
           python cli/cli.py examples/model_v14.xlsx examples/model_v15.xlsx \

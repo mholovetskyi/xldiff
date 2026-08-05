@@ -44,6 +44,27 @@ check(opex.ratio > 0.9, "Opex alignment confidence is high (" + opex.ratio.toFix
 console.log("comparing a file with itself");
 check(xldiff.compare(b, b).findings.length === 0, "identical files produce no findings");
 
+console.log("errors introduced by the revision");
+const sa = XLSX.read(fs.readFileSync(path.join(ROOT, "examples/sample_before.xlsx")), opts);
+const sb = XLSX.read(fs.readFileSync(path.join(ROOT, "examples/sample_after.xlsx")), opts);
+const s = xldiff.compare(sa, sb);
+const sgot = new Set(s.findings.map(key));
+[
+  "high|error_introduced|Revenue build|B14",
+  "high|broken_reference|Revenue build|B16",
+  "high|sheet_deleted|Prior year|"
+].forEach((k) => check(sgot.has(k), k.replace(/\|/g, " ")));
+
+const errf = s.findings.find((f) => f.kind === "error_introduced");
+check(errf.summary.indexOf("#DIV/0!") !== -1, "the error finding names the error it found");
+check(!s.stale, "an error value is a result, not a missing one, so nothing reads as stale");
+
+console.log("errors cleared by the revision");
+const cleared = xldiff.compare(sb, sa).findings.filter((f) => f.kind === "error_cleared");
+check(cleared.length === 2, "reversing the pair reports both fixes (" + cleared.length + ")");
+check(cleared.every((f) => f.severity === "low"),
+  "a fix is low severity, so it cannot crowd out a real problem");
+
 console.log("checking the committed build");
 const tpl = fs.readFileSync(path.join(ROOT, "web/app.template.html"), "utf8");
 const expected = tpl

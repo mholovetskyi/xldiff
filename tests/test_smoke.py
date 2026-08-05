@@ -15,6 +15,8 @@ from engine import compare  # noqa: E402
 
 A = os.path.join(ROOT, "examples", "model_v14.xlsx")
 B = os.path.join(ROOT, "examples", "model_v15.xlsx")
+SA = os.path.join(ROOT, "examples", "sample_before.xlsx")
+SB = os.path.join(ROOT, "examples", "sample_after.xlsx")
 
 EXPECTED = [
     ("high", "run_break", "Revenue build", "F13"),
@@ -60,6 +62,28 @@ def main():
     same = compare(B, B)
     check(len(same["findings"]) == 0,
           "identical files produce no findings (got %d)" % len(same["findings"]))
+
+    print("errors introduced by the revision")
+    sample = compare(SA, SB)
+    got = set((f.severity, f.kind, f.sheet, f.ref) for f in sample["findings"])
+    for exp in [
+        ("high", "error_introduced", "Revenue build", "B14"),
+        ("high", "broken_reference", "Revenue build", "B16"),
+        ("high", "sheet_deleted", "Prior year", ""),
+    ]:
+        check(exp in got, "%s %s at %s!%s" % exp)
+
+    err = [f for f in sample["findings"] if f.kind == "error_introduced"][0]
+    check("#DIV/0!" in err.summary, "the error finding names the error it found")
+    check(not sample["stale"],
+          "an error value is a result, not a missing one, so nothing reads as stale")
+
+    print("errors cleared by the revision")
+    back = compare(SB, SA)
+    cleared = [f for f in back["findings"] if f.kind == "error_cleared"]
+    check(len(cleared) == 2, "reversing the pair reports both fixes (got %d)" % len(cleared))
+    check(all(f.severity == "low" for f in cleared),
+          "a fix is low severity, so it cannot crowd out a real problem")
 
     print("")
     if failures:

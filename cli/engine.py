@@ -232,6 +232,59 @@ def find_run_break(grid, row, col):
     return expected
 
 
+_ERROR = re.compile(r'#(REF!|DIV/0!|VALUE!|NAME\?|N/A|NULL!|NUM!|SPILL!|CALC!)')
+
+
+def error_text(value):
+    """The Excel error a cached value carries, or None if it holds a result."""
+    if isinstance(value, str):
+        m = _ERROR.fullmatch(value.strip())
+        if m:
+            return m.group(0)
+    return None
+
+
+def broken_ref(formula):
+    """A formula whose text has lost a reference reads #REF! literally."""
+    return isinstance(formula, str) and "#REF!" in formula
+
+
+def error_finding(name, ref, lc, rc, base):
+    """Errors outrank every other reading of a cell.
+
+    A formula that changed and a formula that now returns #DIV/0! are the same
+    edit, but only one of them is worth waking someone for, so the error is
+    what gets reported and the formula change rides along in before/after.
+    """
+    lb, rb = broken_ref(lc.formula), broken_ref(rc.formula)
+    if rb and not lb:
+        return Finding(
+            "high", "broken_reference", name, ref,
+            "Formula lost a reference and now reads #REF!",
+            "Whatever this pointed at was deleted. The cell cannot recalculate.",
+            before=fmt(lc.formula), after=fmt(rc.formula), **base)
+
+    le, re_ = error_text(lc.value), error_text(rc.value)
+    if re_ and not le:
+        return Finding(
+            "high", "error_introduced", name, ref,
+            "This cell now evaluates to %s" % re_,
+            "It held a value in the baseline.",
+            before=fmt(lc.formula), after=fmt(rc.formula), **base)
+    if le and not re_:
+        return Finding(
+            "low", "error_cleared", name, ref,
+            "An error here was fixed",
+            "The baseline returned %s." % le,
+            before=fmt(lc.formula), after=fmt(rc.formula), **base)
+    if lb and not rb:
+        return Finding(
+            "low", "error_cleared", name, ref,
+            "A broken reference here was repaired",
+            before=fmt(lc.formula), after=fmt(rc.formula), **base)
+    return None
+
+
 def value_delta(lc, rc):
     a, b = lc.value, rc.value
     if isinstance(a, (int, float)) and isinstance(b, (int, float)) \
@@ -277,6 +330,14 @@ def diff_sheet(name, left, right, findings, align_out=None):
             same_logic = lc.r1c1 == rc.r1c1
             vb, va = fmt(lc.value), fmt(rc.value)
             mag = value_delta(lc, rc)
+
+            err = error_finding(name, ref, lc, rc, dict(
+                val_before=vb, val_after=va, magnitude=mag,
+                row_left=lr, row_right=rr))
+            if err is not None:
+                findings.append(err)
+                continue
+
             if same_logic:
                 if lc.value != rc.value and not lc.empty:
                     findings.append(Finding(
@@ -291,12 +352,16 @@ def diff_sheet(name, left, right, findings, align_out=None):
             if lc.empty:
                 findings.append(Finding(
                     "low", "cell_added", name, ref, "Cell added",
-                    after=fmt(rc.formula), row_left=lr, row_right=rr))
+                    after=fmt(rc.formula),
+                    val_before=vb, val_after=va, magnitude=mag,
+                    row_left=lr, row_right=rr))
                 continue
             if rc.empty:
                 findings.append(Finding(
                     "medium", "cell_deleted", name, ref, "Cell cleared",
-                    before=fmt(lc.formula), row_left=lr, row_right=rr))
+                    before=fmt(lc.formula),
+                    val_before=vb, val_after=va, magnitude=mag,
+                    row_left=lr, row_right=rr))
                 continue
 
             if lc.is_formula and not rc.is_formula:
@@ -316,6 +381,7 @@ def diff_sheet(name, left, right, findings, align_out=None):
                     "medium", "constant_to_formula", name, ref,
                     "Constant replaced by a formula",
                     before=fmt(lc.formula), after=fmt(rc.formula),
+                    val_before=vb, val_after=va, magnitude=mag,
                     row_left=lr, row_right=rr))
                 continue
 
@@ -335,6 +401,7 @@ def diff_sheet(name, left, right, findings, align_out=None):
                         "low", "run_repaired", name, ref,
                         "Formula now matches the rest of its row",
                         before=fmt(lc.formula), after=fmt(rc.formula),
+                        val_before=vb, val_after=va, magnitude=mag,
                         row_left=lr, row_right=rr))
                 else:
                     new_lits = set(literals_in(rc.formula)) - set(literals_in(lc.formula))
