@@ -318,6 +318,9 @@ details>summary::-webkit-details-marker{display:none}
     <label class="opt"><input type="radio" name="xf" value="json"><span class="dot"></span>
       <span><span class="hd" style="font-size:13.5px;display:block">JSON</span>
       <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">Same findings, machine-readable. What a CI gate reads.</span></span></label>
+    <label class="opt"><input type="radio" name="xf" value="xlsx"><span class="dot"></span>
+      <span><span class="hd" style="font-size:13.5px;display:block">Annotated workbook</span>
+      <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">A copy of the revised file with every finding as a cell comment, to review in Excel. Cell highlighting needs the CLI.</span></span></label>
     <label class="opt"><input type="radio" name="xf" value="waivers"><span class="dot"></span>
       <span><span class="hd" style="font-size:13.5px;display:block">Waiver file</span>
       <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">The findings you suppressed, as a file to commit. The CLI gate stops reporting them until the change itself is edited again.</span></span></label>
@@ -1826,8 +1829,8 @@ function payload(){
   var keep=$("xsup").checked;
   return R.findings.filter(function(f){return keep||!suppressed[f.id];});
 }
-function download(name,mime,text){
-  var blob=new Blob([text],{type:mime});
+function download(name,mime,body){
+  var blob=new Blob([body],{type:mime});
   var url=URL.createObjectURL(blob);
   var a=document.createElement("a");
   a.href=url; a.download=name; document.body.appendChild(a); a.click();
@@ -1835,6 +1838,11 @@ function download(name,mime,text){
 }
 $("xgo").onclick=function(){
   var f=payload();
+  if(chosen()==="xlsx"){
+    annotateWorkbook(f);
+    $("exportdlg").hidden=true;
+    return;
+  }
   if(chosen()==="waivers"){
     var picked=R.findings.filter(function(x){return suppressed[x.id];});
     download("xldiff-waivers.json","application/json",JSON.stringify({
@@ -1856,6 +1864,67 @@ $("xgo").onclick=function(){
   }
   $("exportdlg").hidden=true;
 };
+
+/* The reviewer lives in the grid, not in a browser tab. A report they read
+   alongside the model is one they read once; a comment on the cell is one they
+   meet while doing the work. Re-reads the revised file from disk so the copy is
+   the real workbook with comments added, not a reconstruction of it. */
+function annotateWorkbook(list){
+  var byCell={}, homeless=0;
+  list.forEach(function(f){
+    if(!f.ref||!/^[A-Z]{1,3}[0-9]+$/.test(f.ref)){homeless++;return;}
+    (byCell[f.sheet+"\u0001"+f.ref]=byCell[f.sheet+"\u0001"+f.ref]||[]).push(f);
+  });
+  var fr=new FileReader();
+  fr.onload=function(){
+    var wb;
+    try{ wb=XLSX.read(new Uint8Array(fr.result),{type:"array",cellFormula:true,cellStyles:false}); }
+    catch(e){ note("Could not re-read "+files.B.name+" to annotate it.","EXPORT"); return; }
+    var marked=0;
+    Object.keys(byCell).forEach(function(key){
+      var parts=key.split("\u0001"), ws=wb.Sheets[parts[0]];
+      if(!ws) return;
+      var cell=ws[parts[1]];
+      if(!cell){ cell=ws[parts[1]]={t:"z"}; }
+      cell.c=[{a:"xldiff",t:commentText(byCell[key])}];
+      cell.c.hidden=true;
+      marked++;
+    });
+    var out=XLSX.write(wb,{bookType:"xlsx",type:"array"});
+    download("xldiff-annotated.xlsx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",out);
+    note(marked+" cell"+(marked===1?"":"s")+" annotated"+
+      (homeless?", "+homeless+" finding"+(homeless===1?"":"s")+
+        " had no cell to attach to":"")+".","EXPORT");
+  };
+  fr.readAsArrayBuffer(files.B);
+}
+function commentText(group){
+  var order={high:0,medium:1,low:2};
+  group.sort(function(a,b){return order[a.severity]-order[b.severity];});
+  var lines=[];
+  group.forEach(function(f){
+    lines.push("["+f.severity.toUpperCase()+"] "+f.summary);
+    if(f.detail) lines.push(f.detail);
+    if(f.before||f.after){
+      lines.push("was: "+(f.before||"(empty)"));
+      lines.push("now: "+(f.after||"(empty)"));
+    }
+    if(f.valBefore!==f.valAfter&&(f.valBefore||f.valAfter))
+      lines.push("value "+(f.valBefore||"(empty)")+" -> "+(f.valAfter||"(empty)"));
+    if(f.chain&&f.chain.length>1) lines.push("moves "+f.chain.slice(1).join(" -> "));
+    (f.outputs||[]).slice(0,2).forEach(function(o){
+      lines.push(o.ref+" "+(o.label||"output")+": "+o.before+" -> "+o.after+
+        " ("+(o.move*100).toFixed(1)+"%)");
+    });
+    if(suppressed[f.id]){
+      var meta=waiverMeta[f.id]||{};
+      lines.push("waived: "+(meta.reason||"no reason given"));
+    }
+    lines.push("");
+  });
+  return lines.join("\n").replace(/\n+$/, "");
+}
 
 /* 1n — the same viewer as a static file: no scripting needed to read it. */
 function report(f){
@@ -1908,9 +1977,9 @@ $("wfile").onchange=function(){
   fr.onload=function(){
     var data, applied=0, unmatched=0;
     try{ data=JSON.parse(fr.result); }
-    catch(e){ note("That file is not JSON, so there are no waivers to read."); return; }
+    catch(e){ note("That file is not JSON, so there are no waivers to read.","WAIVERS"); return; }
     if(!data||!Array.isArray(data.waivers)){
-      note('That JSON has no "waivers" list, so it is not a waiver file.'); return; }
+      note('That JSON has no "waivers" list, so it is not a waiver file.',"WAIVERS"); return; }
     var byId={};
     R.findings.forEach(function(f){ byId[f.id]=1; });
     data.waivers.forEach(function(w){
@@ -1922,17 +1991,17 @@ $("wfile").onchange=function(){
        edited again, so the acceptance no longer describes what is there. */
     note(applied+" waiver"+(applied===1?"":"s")+" applied"+
       (unmatched?", "+unmatched+(unmatched===1?" no longer matches":" no longer match")+
-        " anything in this comparison":"")+".");
+        " anything in this comparison":"")+".","WAIVERS");
     verdict(); list(); strip();
   };
   fr.readAsText(file);
   $("wfile").value="";
 };
-function note(text){
+function note(text,tag){
   var band=$("warnband");
   var el=document.createElement("div");
   el.className="warn";
-  el.innerHTML='<span class="sv">WAIVERS</span><span>'+esc(text)+"</span>";
+  el.innerHTML='<span class="sv">'+esc(tag||"XLDIFF")+'</span><span>'+esc(text)+"</span>";
   band.appendChild(el);
   setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); },6000);
 }

@@ -13,6 +13,7 @@ import os
 import sys
 
 import waivers as waiver_file
+from annotate import annotate
 from engine import compare
 from report import render
 
@@ -39,6 +40,9 @@ def main(argv=None):
     ap.add_argument("--write-waivers", dest="write_waivers", default="",
                     help="write a waiver file covering every finding in this "
                          "run, to edit down and commit.")
+    ap.add_argument("--annotate", default="",
+                    help="write a copy of the revised workbook with each "
+                         "finding as a cell comment, for reviewing in Excel.")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
 
@@ -127,6 +131,17 @@ def main(argv=None):
                        "outputs": result["outputs"],
                        "outputs_declared": result["outputs_declared"]},
                       fh, indent=2)
+
+    if a.annotate:
+        # Waived findings are annotated too, with their reason. Someone opening
+        # the copy should see that a cell was reviewed and accepted, not that
+        # nobody looked at it.
+        marked, homeless = annotate(a.new, all_findings, a.annotate)
+        if not a.quiet:
+            print("annotated workbook: %s (%d cells%s)"
+                  % (os.path.abspath(a.annotate), marked,
+                     ", %d findings have no cell to attach to" % homeless
+                     if homeless else ""))
 
     if a.fail_on != "never":
         limit = SEV_RANK[a.fail_on]

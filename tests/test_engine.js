@@ -194,6 +194,20 @@ const committed = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 check(expected === committed, "index.html matches a fresh build of the sources");
 check(!/<script[^>]+src=/i.test(committed), "index.html loads nothing from the network");
 
+// The drift check proves the build matches its sources. It cannot tell whether
+// those sources parse, and a syntax error in the app script ships a page that
+// loads and does nothing at all.
+const scripts = committed.match(/<script>([\s\S]*?)<\/script>/g) || [];
+const appScript = scripts[scripts.length - 1].replace(/^<script>|<\/script>$/g, "");
+let parses = true;
+try {
+  new (require("vm").Script)(appScript, { filename: "index.html app script" });
+} catch (e) {
+  parses = false;
+  console.log("       " + e.message);
+}
+check(parses, "the app script in index.html parses");
+
 console.log("");
 console.log(failed ? failed + " check(s) failed" : "all checks passed");
 process.exit(failed ? 1 : 0);
