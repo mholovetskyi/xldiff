@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r cli/requirements.txt
+      - name: Engine checks
+        run: python tests/test_smoke.py
+      - name: CLI runs end to end
+        run: |
+          python cli/cli.py examples/model_v14.xlsx examples/model_v15.xlsx \
+            --out /tmp/report.html --json /tmp/findings.json --quiet
+          test -s /tmp/report.html
+          test -s /tmp/findings.json
+      - name: Exit code signals high-severity findings
+        run: |
+          set +e
+          python cli/cli.py examples/model_v14.xlsx examples/model_v15.xlsx \
+            --quiet --out /tmp/r.html --fail-on high
+          test $? -eq 1
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+        working-directory: web
+      - name: Engine checks and build drift
+        run: node tests/test_engine.js

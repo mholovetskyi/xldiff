@@ -1,0 +1,13 @@
+{
+  "name": "xldiff-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser build of xldiff. Inlines SheetJS and the engine into one file.",
+  "scripts": {
+    "build": "node build.js",
+    "test": "node ../tests/test_engine.js"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}

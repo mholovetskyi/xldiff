@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>xldiff — compare two Excel models</title>
+<style>
+:root{--bg:#fbfaf8;--card:#fff;--line:#e4e1da;--txt:#26241f;--dim:#6d6a63;
+--hi:#fcebeb;--hib:#A32D2D;--me:#faeeda;--meb:#854F0B;--lo:#e6f1fb;--lob:#185FA5;--ok:#3B6D11}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);
+font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:28px 24px 60px}
+h1{font-size:22px;font-weight:500;margin:0 0 4px}
+.sub{color:var(--dim);font-size:13px;margin-bottom:22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.drops{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+.drop{background:var(--card);border:1.5px dashed var(--line);border-radius:10px;padding:26px 18px;
+text-align:center;cursor:pointer;transition:border-color .12s,background .12s}
+.drop:hover,.drop.over{border-color:#a8a49b;background:#f7f5f1}
+.drop.set{border-style:solid;border-color:var(--ok);background:#f4f9ec}
+.drop .lab{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+.drop .fn{font-size:13px;word-break:break-all}
+.drop .hint{font-size:12px;color:var(--dim);margin-top:4px}
+button{font:inherit;padding:8px 18px;border-radius:7px;border:1px solid var(--txt);
+background:var(--txt);color:#fff;cursor:pointer}
+button[disabled]{background:#dedad2;border-color:#dedad2;color:#8d8981;cursor:default}
+button.ghost{background:transparent;color:var(--txt);border-color:var(--line)}
+.row{display:flex;gap:10px;align-items:center}
+.bar{display:flex;gap:6px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{padding:4px 10px;border-radius:6px;font-size:13px;cursor:pointer;border:1px solid transparent}
+.tab.on{background:var(--bg);border-color:var(--line)}
+.tab .n{color:var(--dim);font-size:11px;margin-left:5px}
+.tab.added{background:#eaf3de;color:var(--ok)}.tab.deleted{background:var(--hi);color:var(--hib)}
+.seg{display:flex;gap:4px;margin-left:8px}
+.seg span{padding:4px 10px;font-size:12px;border:1px solid var(--line);border-radius:6px;cursor:pointer}
+.seg span.on{background:var(--txt);color:#fff;border-color:var(--txt)}
+.panes{display:grid;grid-template-columns:1fr 1fr}
+.pane{overflow:auto;max-height:520px;border-right:1px solid var(--line)}
+.pane:last-child{border-right:none}
+.ph{position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--line);
+padding:6px 10px;font-size:11px;color:var(--dim);z-index:2}
+table{border-collapse:collapse;width:100%;font:11px/1.9 ui-monospace,SFMono-Regular,Menlo,monospace}
+td{padding:0 6px;white-space:nowrap;border-bottom:1px solid #f2f0eb;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+td.rn{color:#a8a49b;text-align:right;width:34px;background:#faf9f6;position:sticky;left:0}
+tr.gap td{background:#f4f2ed;color:#a8a49b;text-align:center;font-size:10px;padding:1px}
+tr.added td{background:#f2f8e9}tr.deleted td{background:#fdf1f1}
+td.high{background:var(--hi);color:var(--hib)}
+td.medium{background:var(--me);color:var(--meb)}
+td.low{background:var(--lo);color:var(--lob)}
+tr.focus td{outline:1px solid #26241f;outline-offset:-1px}
+.f{display:flex;gap:10px;padding:11px 12px;border-bottom:1px solid var(--line);cursor:pointer;align-items:flex-start}
+.f:hover{background:#f4f2ed}
+.dot{width:7px;height:7px;border-radius:50%;margin-top:7px;flex:none}
+.f .d{color:var(--dim);font-size:12px}
+.f .code{font:11px ui-monospace,Menlo,monospace;color:var(--dim);margin-top:3px;white-space:pre-wrap}
+.ref{font:11px ui-monospace,Menlo,monospace;color:var(--dim)}
+.warn{background:var(--me);color:var(--meb);padding:9px 12px;font-size:12px;border-radius:8px;margin-bottom:14px}
+.err{background:var(--hi);color:var(--hib);padding:9px 12px;font-size:12px;border-radius:8px;margin-bottom:14px}
+.foot{color:var(--dim);font-size:12px;margin-top:20px}
+.hide{display:none}
+.badge{font-size:11px;color:var(--ok);border:1px solid #c9dfa8;background:#f4f9ec;
+padding:2px 8px;border-radius:20px}
+</style></head><body><div class="wrap">
+
+<h1>xldiff</h1>
+<div class="sub">Compare two Excel models. See what changed, what got hardcoded, and what moved downstream.
+<span class="badge">files never leave this browser</span></div>
+
+<div id="setup">
+  <div class="drops">
+    <div class="drop" id="dropA"><div class="lab">Before</div>
+      <div class="fn" id="nameA">drop an .xlsx here</div>
+      <div class="hint">or click to choose</div></div>
+    <div class="drop" id="dropB"><div class="lab">After</div>
+      <div class="fn" id="nameB">drop an .xlsx here</div>
+      <div class="hint">or click to choose</div></div>
+  </div>
+  <input type="file" id="fileA" accept=".xlsx,.xlsm" class="hide">
+  <input type="file" id="fileB" accept=".xlsx,.xlsm" class="hide">
+  <div class="row"><button id="go" disabled>Compare</button>
+    <span class="ref" id="status"></span></div>
+  <div id="setupmsg"></div>
+</div>
+
+<div id="results" class="hide">
+  <div class="row" style="margin-bottom:14px">
+    <div class="sub" id="summary" style="margin:0"></div>
+    <button class="ghost" id="reset" style="margin-left:auto">Compare different files</button>
+  </div>
+  <div id="warn"></div>
+  <div class="card">
+    <div class="bar" id="tabs"></div>
+    <div class="bar">
+      <span style="font-size:12px;color:var(--dim)">View</span>
+      <div class="seg"><span data-layer="values">Values</span><span data-layer="formulas" class="on">Formulas</span></div>
+    </div>
+    <div class="panes">
+      <div class="pane" id="paneL"><div class="ph" id="hl"></div><table id="tl"></table></div>
+      <div class="pane" id="paneR"><div class="ph" id="hr"></div><table id="tr_"></table></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:18px"><div id="findings"></div></div>
+  <div class="foot">Findings are ordered by severity, then position. Click one to jump to it.</div>
+</div>
+</div>
+
+<script>__XLSX__</script>
+<script>__ENGINE__</script>
+<script>
+(function(){
+"use strict";
+var CONTEXT=2, MAX_COLS=12;
+var SEVC={high:"#A32D2D",medium:"#854F0B",low:"#185FA5"};
+var files={A:null,B:null}, R=null, sheets=[], active=0, layer="formulas";
+
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];});}
+
+function wire(slot){
+  var zone=$("drop"+slot), input=$("file"+slot);
+  zone.onclick=function(){input.click();};
+  zone.ondragover=function(e){e.preventDefault();zone.classList.add("over");};
+  zone.ondragleave=function(){zone.classList.remove("over");};
+  zone.ondrop=function(e){e.preventDefault();zone.classList.remove("over");
+    if(e.dataTransfer.files.length) take(slot,e.dataTransfer.files[0]);};
+  input.onchange=function(){if(input.files.length)take(slot,input.files[0]);};
+}
+function take(slot,file){
+  if(!/\.(xlsx|xlsm)$/i.test(file.name)){
+    $("setupmsg").innerHTML='<div class="err">'+esc(file.name)+
+      " is not an .xlsx or .xlsm file. xldiff reads Excel workbooks only.</div>";
+    return;
+  }
+  files[slot]=file;
+  $("name"+slot).textContent=file.name;
+  $("drop"+slot).classList.add("set");
+  $("go").disabled=!(files.A&&files.B);
+  $("setupmsg").innerHTML="";
+}
+
+function countFormulas(side){
+  var n=0;
+  for(var s in side) for(var k in side[s].cells){
+    var f=side[s].cells[k].f;
+    if(typeof f==="string"&&f.charAt(0)==="=") n++;
+  }
+  return n;
+}
+
+function readOne(file){
+  return new Promise(function(res,rej){
+    var fr=new FileReader();
+    fr.onload=function(){
+      try{res(XLSX.read(new Uint8Array(fr.result),{type:"array",cellFormula:true,cellNF:false,cellStyles:false}));}
+      catch(e){rej(new Error(file.name+" could not be read as a workbook."));}
+    };
+    fr.onerror=function(){rej(new Error("Could not read "+file.name));};
+    fr.readAsArrayBuffer(file);
+  });
+}
+
+$("go").onclick=function(){
+  $("status").textContent="reading…";$("go").disabled=true;
+  Promise.all([readOne(files.A),readOne(files.B)]).then(function(wbs){
+    $("status").textContent="comparing…";
+    setTimeout(function(){
+      try{
+        R=xldiff.compare(wbs[0],wbs[1]);
+        if(!countFormulas(R.left)&&!countFormulas(R.right))
+          throw new Error("Neither workbook contains any formulas. xldiff compares models, so there is nothing here it can reason about.");
+        show();
+      }
+      catch(e){ fail(e); }
+    },10);
+  }).catch(fail);
+};
+function fail(e){
+  $("status").textContent="";$("go").disabled=false;
+  $("setupmsg").innerHTML='<div class="err">'+esc(e.message||String(e))+"</div>";
+}
+$("reset").onclick=function(){
+  files={A:null,B:null};R=null;
+  ["A","B"].forEach(function(s){$("drop"+s).classList.remove("set");
+    $("name"+s).textContent="drop an .xlsx here";$("file"+s).value="";});
+  $("go").disabled=true;$("status").textContent="";
+  $("results").classList.add("hide");$("setup").classList.remove("hide");
+};
+
+function buildHunks(name,left,right,sevByRef){
+  var info=R.align[name];
+  if(!info) return [];
+  var rows=[];
+  info.pairs.forEach(function(p){rows.push([p[0],p[1]]);});
+  info.added.slice().sort(function(a,b){return a-b;}).forEach(function(r){rows.push([null,r]);});
+  info.deleted.slice().sort(function(a,b){return a-b;}).forEach(function(r){rows.push([r,null]);});
+  rows.sort(function(a,b){return ((a[1]||a[0]||0)-(b[1]||b[0]||0))||((a[0]||0)-(b[0]||0));});
+
+  var hot={}, sev=sevByRef[name]||{};
+  rows.forEach(function(rw,i){
+    var flag=(rw[0]===null||rw[1]===null);
+    if(!flag&&rw[1]){for(var c=1;c<=MAX_COLS;c++){
+      if(sev[xldiff.colLetter(c)+rw[1]]){flag=true;break;}}}
+    if(flag) for(var j=Math.max(0,i-CONTEXT);j<Math.min(rows.length,i+CONTEXT+1);j++) hot[j]=1;
+  });
+
+  var ncol=Math.min(Math.max(left.maxCol,right.maxCol),MAX_COLS);
+  var out=[],prev=null;
+  Object.keys(hot).map(Number).sort(function(a,b){return a-b;}).forEach(function(i){
+    var lr=rows[i][0], rr=rows[i][1];
+    if(prev!==null&&i!==prev+1) out.push({gap:true});
+    prev=i;
+    var cells=[];
+    for(var c=1;c<=ncol;c++){
+      var lc=lr?xldiff.get(left,lr,c):null, rc=rr?xldiff.get(right,rr,c):null;
+      cells.push({c:xldiff.colLetter(c),
+        lf:lc?xldiff.fmt(lc.f):"", lv:lc?xldiff.fmt(lc.v):"",
+        rf:rc?xldiff.fmt(rc.f):"", rv:rc?xldiff.fmt(rc.v):"",
+        sev:rr?(sev[xldiff.colLetter(c)+rr]||""):""});
+    }
+    out.push({l:lr,r:rr,cells:cells,state:lr===null?"added":(rr===null?"deleted":"")});
+  });
+  return out;
+}
+
+function show(){
+  var f=R.findings, sevByRef={};
+  f.forEach(function(x){ if(x.ref&&x.kind!=="impact_capped"){
+    (sevByRef[x.sheet]=sevByRef[x.sheet]||{})[x.ref]=x.severity;}});
+
+  sheets=[];
+  Object.keys(R.right).forEach(function(n){
+    sheets.push({name:n,state:R.left[n]?"":"added",
+      hunks:R.left[n]?buildHunks(n,R.left[n],R.right[n],sevByRef):[],
+      n:f.filter(function(x){return x.sheet===n;}).length});
+  });
+  Object.keys(R.left).forEach(function(n){
+    if(!R.right[n]) sheets.push({name:n,state:"deleted",hunks:[],
+      n:f.filter(function(x){return x.sheet===n;}).length});
+  });
+
+  var c={high:0,medium:0,low:0};
+  f.forEach(function(x){c[x.severity]++;});
+  $("summary").textContent=files.A.name+"  vs  "+files.B.name+"   ·   "+
+    f.length+" findings: "+c.high+" high, "+c.medium+" medium, "+c.low+" low";
+  $("warn").innerHTML=R.stale?'<div class="warn">One of these files has no cached calculation values. Value impact is incomplete. Open it in Excel, recalculate, and save.</div>':"";
+
+  active=0;
+  $("setup").classList.add("hide");$("results").classList.remove("hide");
+  tabs();grid();list();
+}
+
+function tabs(){
+  var h="";
+  sheets.forEach(function(s,i){
+    h+='<span class="tab '+(i===active?"on ":"")+s.state+'" data-i="'+i+'">'+esc(s.name)+
+       '<span class="n">'+s.n+"</span></span>";});
+  var e=$("tabs");e.innerHTML=h;
+  Array.prototype.forEach.call(e.querySelectorAll(".tab"),function(t){
+    t.onclick=function(){active=+t.dataset.i;tabs();grid();};});
+}
+
+function grid(){
+  var s=sheets[active];
+  $("hl").textContent=files.A.name+" · "+s.name;
+  $("hr").textContent=files.B.name+" · "+s.name;
+  var L="",Rr="";
+  if(!s.hunks.length){
+    L=Rr='<tr><td style="color:#a8a49b;padding:10px">no aligned changes on this sheet</td></tr>';}
+  s.hunks.forEach(function(h,i){
+    if(h.gap){L+='<tr class="gap"><td colspan="20">···</td></tr>';
+              Rr+='<tr class="gap"><td colspan="20">···</td></tr>';return;}
+    var cls=h.state?' class="'+h.state+'"':"";
+    L+="<tr"+cls+' data-h="'+i+'"><td class="rn">'+(h.l||"")+"</td>";
+    Rr+="<tr"+cls+' data-h="'+i+'"><td class="rn">'+(h.r||"")+"</td>";
+    h.cells.forEach(function(c){
+      L+='<td class="'+(c.sev||"")+'">'+esc(layer==="formulas"?c.lf:c.lv)+"</td>";
+      Rr+='<td class="'+(c.sev||"")+'">'+esc(layer==="formulas"?c.rf:c.rv)+"</td>";});
+    L+="</tr>";Rr+="</tr>";});
+  $("tl").innerHTML=L;$("tr_").innerHTML=Rr;
+}
+
+function list(){
+  var h="";
+  R.findings.forEach(function(f,i){
+    var code=(f.before||f.after)?esc(f.before)+"   \u2192   "+esc(f.after):"";
+    var val=(f.valBefore!==f.valAfter&&(f.valBefore||f.valAfter))
+      ?'<span class="ref">value '+esc(f.valBefore)+" \u2192 "+esc(f.valAfter)+"</span>":"";
+    h+='<div class="f" data-i="'+i+'"><span class="dot" style="background:'+SEVC[f.severity]+'"></span><div>'+
+       "<div>"+esc(f.summary)+(f.ref?' <span class="ref">'+esc(f.sheet)+"!"+esc(f.ref)+"</span>"
+       :(f.sheet?' <span class="ref">'+esc(f.sheet)+"</span>":""))+"</div>"+
+       (f.detail?'<div class="d">'+esc(f.detail)+"</div>":"")+
+       (code?'<div class="code">'+code+"</div>":"")+
+       (val?'<div class="d">'+val+"</div>":"")+"</div></div>";});
+  var e=$("findings");e.innerHTML=h;
+  Array.prototype.forEach.call(e.querySelectorAll(".f"),function(el){
+    el.onclick=function(){jump(R.findings[+el.dataset.i]);};});
+}
+
+function jump(f){
+  var idx=-1;sheets.forEach(function(s,i){if(s.name===f.sheet)idx=i;});
+  if(idx<0)return;
+  if(idx!==active){active=idx;tabs();grid();}
+  if(!f.ref)return;
+  var row=parseInt(f.ref.replace(/[^0-9]/g,""),10);
+  var s=sheets[active],hi=-1;
+  s.hunks.forEach(function(h,i){if(!h.gap&&h.r===row)hi=i;});
+  if(hi<0)return;
+  ["tl","tr_"].forEach(function(id){
+    var t=$(id);
+    Array.prototype.forEach.call(t.querySelectorAll("tr"),function(r){r.classList.remove("focus");});
+    var tgt=t.querySelector('tr[data-h="'+hi+'"]');
+    if(tgt){tgt.classList.add("focus");tgt.scrollIntoView({block:"center"});}});
+}
+
+Array.prototype.forEach.call(document.querySelectorAll(".seg span"),function(b){
+  b.onclick=function(){layer=b.dataset.layer;
+    Array.prototype.forEach.call(document.querySelectorAll(".seg span"),function(x){x.classList.remove("on");});
+    b.classList.add("on");grid();};});
+
+var pl=$("paneL"),pr=$("paneR"),lock=false;
+function sync(a,b){a.addEventListener("scroll",function(){if(lock)return;lock=true;
+  b.scrollTop=a.scrollTop;b.scrollLeft=a.scrollLeft;lock=false;});}
+sync(pl,pr);sync(pr,pl);
+
+wire("A");wire("B");
+})();
+</script></body></html>

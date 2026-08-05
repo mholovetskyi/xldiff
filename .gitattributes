@@ -1,0 +1,6 @@
+# Normalise text to LF in the repository so the index.html build-drift check
+# in CI does not depend on the platform a contributor built on.
+* text=auto eol=lf
+
+*.xlsx binary
+*.xlsm binary
