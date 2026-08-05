@@ -165,17 +165,53 @@ function alignRows(left, right) {
   return lcsOpcodes(ls, rs);
 }
 
-function findRunBreak(grid, row, col) {
-  var cell = get(grid, row, col), nb = [];
-  for (var c = Math.max(1, col - 4); c <= Math.min(grid.maxCol, col + 4); c++) {
-    if (c === col) continue;
-    var n = get(grid, row, c);
-    if (!isEmpty(n) && isFormula(n)) nb.push(n.r1c1);
+/* Formulas adjacent to a cell in one direction, stopping at the first gap. A
+   run is contiguous. Reading past a blank row or a label into the next block
+   of the sheet is how unrelated formulas end up treated as neighbours, which
+   reads either as noise or as a break that is not there. */
+function walk(grid, row, col, dr, dc, limit) {
+  var out = [];
+  for (var k = 1; k <= (limit || 4); k++) {
+    var n = get(grid, row + dr * k, col + dc * k);
+    if (isEmpty(n) || !isFormula(n)) break;
+    out.push(n.r1c1);
   }
+  return out;
+}
+
+/* Is this cell the odd one out in an otherwise uniform run? axis "row" reads
+   the horizontal neighbours, "column" the vertical ones. Both matter: filling
+   across a row and dragging down a column break a deliberate exception in
+   exactly the same way. */
+function findRunBreak(grid, row, col, axis) {
+  var cell = get(grid, row, col);
+  var dr = axis === "row" ? 0 : 1, dc = axis === "row" ? 1 : 0;
+  var fb = walk(grid, row, col, -dr, -dc), fa = walk(grid, row, col, dr, dc);
+  var nb = fb.concat(fa), i;
   if (nb.length < 2) return null;
-  for (var i = 1; i < nb.length; i++) if (nb[i] !== nb[0]) return null;
+  for (i = 1; i < nb.length; i++) if (nb[i] !== nb[0]) return null;
+
+  /* A column of identical formulas nearly always ends in a total that is
+     meant to differ, so a vertical break only counts when the run continues
+     on both sides of the odd cell. Rows do not need this: a row of quarters
+     is a homogeneous series to its last column, and requiring both sides
+     there would blind the tool to a break in the final period. */
+  if (axis === "column" && (!fb.length || !fa.length)) return null;
+
   if (isFormula(cell) && cell.r1c1 === nb[0]) return null;
   return nb[0];
+}
+
+/* What the neighbours agree on, and which axis they lie along. Horizontal is
+   tried first: it is the more common accident, and settling on one axis keeps
+   a single cell from producing two findings for the same mistake. */
+function runContext(grid, row, col) {
+  var axes = ["row", "column"];
+  for (var i = 0; i < axes.length; i++) {
+    var expected = findRunBreak(grid, row, col, axes[i]);
+    if (expected !== null) return { expected: expected, axis: axes[i] };
+  }
+  return { expected: null, axis: null };
 }
 
 var ERROR = /^#(REF!|DIV\/0!|VALUE!|NAME\?|N\/A|NULL!|NUM!|SPILL!|CALC!)$/;
@@ -285,10 +321,11 @@ function diffSheet(name, left, right, findings, align) {
         return;
       }
       if (isFormula(lc) && !isFormula(rc)) {
-        var expected = findRunBreak(right, rr, c);
+        var hc = runContext(right, rr, c);
         findings.push(F("high", "hardcode", name, ref, "Hardcode replaced a formula",
           Object.assign({
-            detail: expected ? "The row it sits in is still calculated." : "This cell no longer recalculates.",
+            detail: hc.expected ? "The " + hc.axis + " it sits in is still calculated."
+              : "This cell no longer recalculates.",
             before: fmt(lc.f), after: fmt(rc.f)
           }, base)));
         return;
@@ -300,12 +337,15 @@ function diffSheet(name, left, right, findings, align) {
         return;
       }
       if (isFormula(lc) && isFormula(rc)) {
-        var exp = findRunBreak(right, rr, c), was = findRunBreak(left, lr, c);
-        if (exp !== null) {
-          findings.push(F("high", "run_break", name, ref, "Formula breaks the run in its row",
-            Object.assign({ detail: "Neighbours use " + exp, before: fmt(lc.f), after: fmt(rc.f) }, base)));
-        } else if (was !== null) {
-          findings.push(F("low", "run_repaired", name, ref, "Formula now matches the rest of its row",
+        var now = runContext(right, rr, c), was = runContext(left, lr, c);
+        if (now.expected !== null) {
+          findings.push(F("high", "run_break", name, ref,
+            "Formula breaks the run in its " + now.axis,
+            Object.assign({ detail: "Neighbours use " + now.expected,
+              before: fmt(lc.f), after: fmt(rc.f) }, base)));
+        } else if (was.expected !== null) {
+          findings.push(F("low", "run_repaired", name, ref,
+            "Formula now matches the rest of its " + was.axis,
             Object.assign({ before: fmt(lc.f), after: fmt(rc.f) }, base)));
         } else {
           var old = literalsIn(lc.f), lits = literalsIn(rc.f).filter(function (x) { return old.indexOf(x) === -1; });

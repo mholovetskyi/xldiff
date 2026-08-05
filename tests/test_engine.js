@@ -55,6 +55,20 @@ const sgot = new Set(s.findings.map(key));
   "high|sheet_deleted|Prior year|"
 ].forEach((k) => check(sgot.has(k), k.replace(/\|/g, " ")));
 
+console.log("run breaks on both axes");
+check(sgot.has("high|run_break|Revenue build|B20"),
+  "an overridden step mid-column is a vertical run break");
+check(s.findings.find((f) => f.ref === "B20").summary.indexOf("column") !== -1,
+  "the finding names the axis that broke");
+check(s.findings.find((f) => f.ref === "C7").summary.indexOf("row") !== -1,
+  "a horizontal break still reads as a row");
+
+// A column of identical formulas nearly always ends in a total that is meant
+// to differ. Reporting that as a break would make the whole axis useless.
+const d11 = r.findings.find((f) => f.sheet === "Opex" && f.ref === "D11");
+check(d11 && d11.kind !== "run_break",
+  "a totals row below a uniform column is not a run break");
+
 const errf = s.findings.find((f) => f.kind === "error_introduced");
 check(errf.summary.indexOf("#DIV/0!") !== -1, "the error finding names the error it found");
 check(!s.stale, "an error value is a result, not a missing one, so nothing reads as stale");

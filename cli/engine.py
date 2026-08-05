@@ -212,24 +212,63 @@ def align_rows(left, right):
     return pairs, added, deleted, ratio
 
 
-def find_run_break(grid, row, col):
-    """Is this cell the odd one out in an otherwise uniform horizontal run?"""
+def _walk(grid, row, col, dr, dc, limit=4):
+    """Formulas adjacent to a cell in one direction, stopping at the first gap.
+
+    A run is contiguous. Reading past a blank row or a label into the next
+    block of the sheet is how unrelated formulas end up being treated as
+    neighbours, which reads either as noise or as a break that is not there.
+    """
+    out = []
+    for k in range(1, limit + 1):
+        n = grid.get(row + dr * k, col + dc * k)
+        if n.empty or not n.is_formula:
+            break
+        out.append(n.r1c1)
+    return out
+
+
+def find_run_break(grid, row, col, axis="row"):
+    """Is this cell the odd one out in an otherwise uniform run?
+
+    axis="row" reads the horizontal neighbours, axis="column" the vertical
+    ones. Both matter: drag-filling across a row and dragging down a column
+    break a deliberate exception in exactly the same way.
+    """
     cell = grid.get(row, col)
-    neighbours = []
-    for c in range(max(1, col - 4), min(grid.max_col, col + 4) + 1):
-        if c == col:
-            continue
-        n = grid.get(row, c)
-        if not n.empty and n.is_formula:
-            neighbours.append(n.r1c1)
-    if len(neighbours) < 2:
+    dr, dc = (0, 1) if axis == "row" else (1, 0)
+    fb = _walk(grid, row, col, -dr, -dc)
+    fa = _walk(grid, row, col, dr, dc)
+    seen = fb + fa
+    if len(seen) < 2 or len(set(seen)) != 1:
         return None
-    if len(set(neighbours)) != 1:
+
+    # A column of identical formulas nearly always ends in a total that is
+    # meant to differ, so a vertical break only counts when the run continues
+    # on both sides of the odd cell. Rows do not need this: a row of quarters
+    # is a homogeneous series to its last column, and requiring both sides
+    # there would blind the tool to a break in the final period.
+    if axis == "column" and (not fb or not fa):
         return None
-    expected = neighbours[0]
+
+    expected = seen[0]
     if cell.is_formula and cell.r1c1 == expected:
         return None
     return expected
+
+
+def run_context(grid, row, col):
+    """What this cell's neighbours agree on, and which axis they lie along.
+
+    Horizontal is tried first: it is the more common accident, and settling on
+    one axis keeps a single cell from producing two findings that describe the
+    same mistake.
+    """
+    for axis in ("row", "column"):
+        expected = find_run_break(grid, row, col, axis)
+        if expected is not None:
+            return expected, axis
+    return None, None
 
 
 _ERROR = re.compile(r'#(REF!|DIV/0!|VALUE!|NAME\?|N/A|NULL!|NUM!|SPILL!|CALC!)')
@@ -365,11 +404,11 @@ def diff_sheet(name, left, right, findings, align_out=None):
                 continue
 
             if lc.is_formula and not rc.is_formula:
-                expected = find_run_break(right, rr, c)
+                expected, axis = run_context(right, rr, c)
                 findings.append(Finding(
                     "high", "hardcode", name, ref,
                     "Hardcode replaced a formula",
-                    "The row it sits in is still calculated." if expected else
+                    ("The %s it sits in is still calculated." % axis) if expected else
                     "This cell no longer recalculates.",
                     before=fmt(lc.formula), after=fmt(rc.formula),
                     val_before=vb, val_after=va, magnitude=mag,
@@ -386,12 +425,12 @@ def diff_sheet(name, left, right, findings, align_out=None):
                 continue
 
             if lc.is_formula and rc.is_formula:
-                expected = find_run_break(right, rr, c)
-                was_break = find_run_break(left, lr, c)
+                expected, axis = run_context(right, rr, c)
+                was_break, was_axis = run_context(left, lr, c)
                 if expected is not None:
                     findings.append(Finding(
                         "high", "run_break", name, ref,
-                        "Formula breaks the run in its row",
+                        "Formula breaks the run in its %s" % axis,
                         "Neighbours use %s" % expected,
                         before=fmt(lc.formula), after=fmt(rc.formula),
                         val_before=vb, val_after=va, magnitude=mag,
@@ -399,7 +438,7 @@ def diff_sheet(name, left, right, findings, align_out=None):
                 elif was_break is not None:
                     findings.append(Finding(
                         "low", "run_repaired", name, ref,
-                        "Formula now matches the rest of its row",
+                        "Formula now matches the rest of its %s" % was_axis,
                         before=fmt(lc.formula), after=fmt(rc.formula),
                         val_before=vb, val_after=va, magnitude=mag,
                         row_left=lr, row_right=rr))

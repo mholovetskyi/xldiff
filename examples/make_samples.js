@@ -123,6 +123,19 @@ function revenue(growth, opts) {
   const disc = opts.discount;
   c.B11 = ["B9*" + disc, rev[0] * disc];
   if (opts.cohorts) c.B14 = ["B9/B13", rev[0] / opts.cohorts];
+
+  /* A monthly ramp down column B. Every step is the same formula, so
+     overriding one in the middle is a vertical run break — the cell has the
+     run continuing above and below it, which is what separates a real
+     drag-fill accident from a totals row that is meant to differ. */
+  c.A18 = "Monthly ramp";
+  c.B18 = 100;
+  let u = 100;
+  for (let r = 19; r <= 22; r++) {
+    const rate = (opts.overrideMonth === r) ? 1.05 : 1.01;
+    u = u * rate;
+    c["B" + r] = ["B" + (r - 1) + "*" + rate, Number(u.toFixed(6))];
+  }
   return c;
 }
 
@@ -178,7 +191,8 @@ const before = book([
 
 const after = book([
   ["Revenue build", revenue(0.06, {
-    bumpQ2: true, plugQ3: true, discount: 0.85, cohorts: 0, priorYearGone: true
+    bumpQ2: true, plugQ3: true, discount: 0.85, cohorts: 0, priorYearGone: true,
+    overrideMonth: 20
   })],
   ["Operating costs", costs(true)],
   ["Sensitivity", sensitivity]

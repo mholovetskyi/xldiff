@@ -73,6 +73,22 @@ def main():
     ]:
         check(exp in got, "%s %s at %s!%s" % exp)
 
+    print("run breaks on both axes")
+    check(("high", "run_break", "Revenue build", "B20") in got,
+          "an overridden step mid-column is a vertical run break")
+    vertical = [f for f in sample["findings"] if f.ref == "B20"][0]
+    check("column" in vertical.summary, "the finding names the axis that broke")
+    horizontal = [f for f in sample["findings"] if f.ref == "C7"][0]
+    check("row" in horizontal.summary, "a horizontal break still reads as a row")
+
+    # A column of identical formulas nearly always ends in a total that is
+    # meant to differ. Reporting that as a break would make the whole axis
+    # useless, so it is worth a test of its own.
+    totals = compare(A, B)
+    d11 = [f for f in totals["findings"] if f.sheet == "Opex" and f.ref == "D11"]
+    check(d11 and d11[0].kind != "run_break",
+          "a totals row below a uniform column is not a run break")
+
     err = [f for f in sample["findings"] if f.kind == "error_introduced"][0]
     check("#DIV/0!" in err.summary, "the error finding names the error it found")
     check(not sample["stale"],
