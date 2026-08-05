@@ -237,7 +237,22 @@ const after = book([
   Headroom: "'Sensitivity'!$B$5"
 });
 
-for (const [name, wb] of [["sample_before.xlsx", before], ["sample_after.xlsx", after]]) {
+/* A version between the two, so lineage has three points to walk. The growth
+   rate has already moved here; the plug and the deleted sheet have not landed
+   yet, which is what lets "when did this first appear" have an answer. */
+const interim = book([
+  ["Revenue build", revenue(0.06, { discount: 0.9, cohorts: 4 })],
+  ["Operating costs", costs({})],
+  ["Prior year", priorYear]
+], {
+  GrowthRate: "'Revenue build'!$B$4",
+  TAX1: "'Revenue build'!$B$24",
+  LegacyOpex: "'Operating costs'!$B$7"
+});
+
+for (const [name, wb] of [["sample_before.xlsx", before],
+                          ["sample_interim.xlsx", interim],
+                          ["sample_after.xlsx", after]]) {
   const dest = path.join(__dirname, name);
   XLSX.writeFile(wb, dest, { bookType: "xlsx" });
   console.log("wrote %s (%d KB)", dest, Math.round(fs.statSync(dest).size / 1024));
