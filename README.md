@@ -20,6 +20,15 @@ once and then disconnecting. The command line tool is equally offline.
 right. That file is self-contained: SheetJS and the engine are inlined, so it works
 from disk, from a USB stick, or on a machine with no internet. Host it anywhere static.
 
+The review screen opens on the worst finding and leads with a verdict derived from the
+counts, so the question "does this need me?" is answered before you scroll. Findings sit
+beside the two sheets; selecting one moves both panes to it and shows the formula diff
+with the changed tokens marked. The panes read as **Values**, **Formulas**, or **Impact**
+— the last showing the value delta per cell, scaled against the largest move on screen.
+A finding you have judged and dismissed can be suppressed, which drops it out of the
+counts and the verdict without deleting it. **Export** writes the review to disk as a
+single HTML file that needs no scripting to read, or as JSON for a CI gate.
+
 **Command line.** For pre-commit hooks and CI:
 
 ```bash
@@ -33,6 +42,12 @@ Try it on the included examples, which have four bugs seeded into them:
 ```bash
 python cli/cli.py examples/model_v14.xlsx examples/model_v15.xlsx
 ```
+
+`examples/sample_before.xlsx` and `examples/sample_after.xlsx` are a second pair,
+built to fire one finding of every class at once — drag them onto the web app to see
+what a full report looks like. Regenerate or edit them with
+`node examples/make_samples.js`, which needs nothing beyond the SheetJS already
+installed for the web build.
 
 ## What it catches
 
@@ -79,7 +94,7 @@ crowd out real problems.
 index.html          the built web app, committed so Pages can serve it directly
 web/                app template, engine.js, build script
 cli/                Python engine, HTML report writer, CLI
-examples/           two versions of a small model with seeded bugs
+examples/           two pairs of small models with seeded bugs, and their generators
 tests/              smoke tests for both engines
 ```
 
