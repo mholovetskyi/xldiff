@@ -127,11 +127,21 @@ class Finding:
     row_right: int = 0
     chain: list = field(default_factory=list)
     downstream: int = 0
+    outputs: list = field(default_factory=list)
+    output_impact: float = 0.0
+    on_output: bool = False
 
     SEV_ORDER = {"high": 0, "medium": 1, "low": 2}
 
     def sort_key(self):
-        return (self.SEV_ORDER[self.severity], self.sheet, self.row_right or self.row_left)
+        # Severity first, then how far the change moved a model output, then
+        # whether it sits on an output at all. That last one matters because a
+        # plug freezes a number rather than moving it: the most dangerous
+        # finding in the tool measures zero movement by construction, and
+        # without this it would sort below every unrelated finding.
+        return (self.SEV_ORDER[self.severity], -self.output_impact,
+                not self.on_output, self.sheet,
+                self.row_right or self.row_left)
 
 
 @dataclass
@@ -726,6 +736,112 @@ def diff_names(names_a, names_b, findings):
 
 _CELLREF = re.compile(r'^([A-Z]{1,3})([1-9][0-9]{0,6})$')
 
+OUTPUT_CAP = 60
+
+
+def row_label(grid, row):
+    return row_signature(grid, row).split("|")[0]
+
+
+def detect_outputs(right, graph, left, inv):
+    """Calculated cells that nothing else reads.
+
+    A leaf in the dependency graph is what a model exists to produce -- the
+    number someone reads out loud. Ranking against these is what makes severity
+    economic rather than syntactic: two high findings are not equally urgent if
+    one moves the headline and the other moves a working column.
+
+    A cell counts if it was calculated in either version. Requiring a formula in
+    the revised file only would drop every cell someone replaced with a plug,
+    which is the one kind of output most worth ranking.
+    """
+    leaves = []
+    for sname in sorted(right):
+        g = right[sname]
+        rmap, cmap = inv.get(sname, ({}, {}))
+        for (r, c) in sorted(g.cells):
+            cell = g.cells[(r, c)]
+            if (sname, r, c) in graph:
+                continue
+            if not isinstance(cell.value, (int, float)) or isinstance(cell.value, bool):
+                continue
+            was = left[sname].get(rmap.get(r), cmap.get(c)) if sname in left else Cell()
+            if not cell.is_formula and not was.is_formula:
+                continue
+            leaves.append((sname, r, c))
+            if len(leaves) >= OUTPUT_CAP:
+                return leaves
+    return leaves
+
+
+def parse_output_spec(spec, grids):
+    """Explicit outputs, as "Sheet!B10" strings. Overrides detection."""
+    out = []
+    for item in spec:
+        sheet, _, ref = item.rpartition("!")
+        m = _CELLREF.match(ref.replace("$", "").strip().upper())
+        if not m or sheet.strip("'") not in grids:
+            continue
+        out.append((sheet.strip("'"), int(m.group(2)), col_to_num(m.group(1))))
+    return out
+
+
+def build_inverse(align):
+    """Right-hand row and column back to their aligned left-hand counterparts."""
+    inv = {}
+    for sheet, a in align.items():
+        inv[sheet] = (dict((rr, lr) for lr, rr in a["pairs"]),
+                      dict((rc, lc) for lc, rc in a["col_pairs"]))
+    return inv
+
+
+def rank_by_outputs(findings, left, right, inv, graph, outputs):
+    """Measure each finding by how far it moves the model's outputs."""
+    oset = set(outputs)
+
+    def output_move(cell):
+        sheet, r, c = cell
+        rmap, cmap = inv.get(sheet, ({}, {}))
+        rv = right[sheet].get(r, c).value if sheet in right else None
+        lr, lc = rmap.get(r), cmap.get(c)
+        lv = left[sheet].get(lr, lc).value if (sheet in left and lr and lc) else None
+        if not isinstance(rv, (int, float)) or not isinstance(lv, (int, float)):
+            return None
+        if isinstance(rv, bool) or isinstance(lv, bool) or rv == lv:
+            return None
+        return (lv, rv, round(abs(rv - lv) / max(abs(lv), 1e-9), 6))
+
+    for f in findings:
+        m = _CELLREF.match(f.ref or "")
+        if not m or not oset:
+            continue
+        start = (f.sheet, int(m.group(2)), col_to_num(m.group(1)))
+        reached = reachable(start, graph)
+        hits = []
+        for cell in sorted(oset & reached):
+            move = output_move(cell)
+            if move is None:
+                continue
+            hits.append({"ref": cell_label(cell), "label": row_label(right[cell[0]], cell[1]),
+                         "before": fmt(move[0]), "after": fmt(move[1]), "move": move[2]})
+        hits.sort(key=lambda h: (-h["move"], h["ref"]))
+        f.outputs = hits[:5]
+        f.output_impact = max([h["move"] for h in hits] or [0.0])
+        f.on_output = start in oset
+
+
+def reachable(start, dependents, limit=2000):
+    seen = {start}
+    order = [start]
+    i = 0
+    while i < len(order) and len(order) < limit:
+        for nxt in dependents.get(order[i], ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                order.append(nxt)
+        i += 1
+    return seen
+
 
 def attach_chains(findings, right, names_b, align):
     """Give every cell finding the path from it to the number it moved.
@@ -749,9 +865,10 @@ def attach_chains(findings, right, names_b, align):
         count, path = trace(start, graph, moved)
         f.downstream = count
         f.chain = [cell_label(c) for c in path]
+    return graph
 
 
-def compare(path_a, path_b):
+def compare(path_a, path_b, outputs=None):
     left, stale_a, names_a = read_workbook(path_a)
     right, stale_b, names_b = read_workbook(path_b)
     findings = []
@@ -782,7 +899,11 @@ def compare(path_a, path_b):
             "%d further cells moved in value with no edit" % suppressed,
             "Showing the %d largest by relative change." % IMPACT_CAP))
 
-    attach_chains(findings, right, names_b, align)
+    graph = attach_chains(findings, right, names_b, align)
+    inv = build_inverse(align)
+    declared = parse_output_spec(outputs or [], right)
+    picked = declared or detect_outputs(right, graph, left, inv)
+    rank_by_outputs(findings, left, right, inv, graph, picked)
 
     findings.sort(key=lambda f: f.sort_key())
     return {
@@ -790,4 +911,6 @@ def compare(path_a, path_b):
         "stale": stale_a or stale_b,
         "files": (path_a, path_b),
         "names": (names_a, names_b),
+        "outputs": [cell_label(c) for c in picked],
+        "outputs_declared": bool(declared),
     }

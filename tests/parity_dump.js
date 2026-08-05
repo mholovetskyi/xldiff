@@ -21,6 +21,7 @@ process.stdout.write(JSON.stringify({
     summary: f.summary, detail: f.detail,
     before: f.before, after: f.after,
     valBefore: f.valBefore, valAfter: f.valAfter,
-    chain: f.chain, downstream: f.downstream
+    chain: f.chain, downstream: f.downstream,
+    outputs: f.outputs, outputImpact: f.outputImpact, onOutput: f.onOutput
   }))
 }, null, 1));

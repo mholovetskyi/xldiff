@@ -452,11 +452,118 @@ function F(sev, kind, sheet, ref, summary, o) {
     detail: o.detail || "", before: o.before || "", after: o.after || "",
     valBefore: o.vb || "", valAfter: o.va || "", magnitude: o.mag || 0,
     rowLeft: o.lr || 0, rowRight: o.rr || 0,
-    chain: [], downstream: 0
+    chain: [], downstream: 0,
+    outputs: [], outputImpact: 0, onOutput: false
   };
 }
 
 var CELLREF = /^([A-Z]{1,3})([1-9][0-9]{0,6})$/;
+var OUTPUT_CAP = 60;
+
+function rowLabel(grid, row) { return rowSignature(grid, row).split("|")[0]; }
+function isNum(v) { return typeof v === "number" && isFinite(v); }
+
+/* Right-hand row and column back to their aligned left-hand counterparts. */
+function buildInverse(align) {
+  var inv = {};
+  for (var sheet in align) {
+    var rmap = {}, cmap = {};
+    align[sheet].pairs.forEach(function (p) { rmap[p[1]] = p[0]; });
+    (align[sheet].colPairs || []).forEach(function (p) { cmap[p[1]] = p[0]; });
+    inv[sheet] = [rmap, cmap];
+  }
+  return inv;
+}
+
+/* Calculated cells that nothing else reads. A leaf in the dependency graph is
+   what a model exists to produce — the number someone reads out loud. Ranking
+   against these is what makes severity economic rather than syntactic.
+
+   A cell counts if it was calculated in either version. Requiring a formula in
+   the revised file only would drop every cell someone replaced with a plug,
+   which is the one kind of output most worth ranking. */
+function detectOutputs(right, graph, left, inv) {
+  var leaves = [], sheets = Object.keys(right).sort();
+  for (var i = 0; i < sheets.length; i++) {
+    var sname = sheets[i], g = right[sname];
+    var maps = inv[sname] || [{}, {}], rmap = maps[0], cmap = maps[1];
+    var keys = Object.keys(g.cells).map(function (k) {
+      var p = k.split(":"); return [+p[0], +p[1]];
+    }).sort(function (a, b) { return (a[0] - b[0]) || (a[1] - b[1]); });
+    for (var j = 0; j < keys.length; j++) {
+      var r = keys[j][0], c = keys[j][1], cell = g.cells[r + ":" + c];
+      if (graph[sname + SEP + r + SEP + c]) continue;
+      if (!isNum(cell.v)) continue;
+      var was = (left[sname] && rmap[r] && cmap[c]) ? get(left[sname], rmap[r], cmap[c]) : EMPTY;
+      if (!isFormula(cell) && !isFormula(was)) continue;
+      leaves.push(sname + SEP + r + SEP + c);
+      if (leaves.length >= OUTPUT_CAP) return leaves;
+    }
+  }
+  return leaves;
+}
+
+/* Explicit outputs, as "Sheet!B10" strings. Overrides detection. */
+function parseOutputSpec(spec, grids) {
+  var out = [];
+  (spec || []).forEach(function (item) {
+    var at = String(item).lastIndexOf("!");
+    if (at < 0) return;
+    var sheet = item.slice(0, at).replace(/^'|'$/g, "");
+    var m = CELLREF.exec(item.slice(at + 1).replace(/\$/g, "").trim().toUpperCase());
+    if (!m || !grids[sheet]) return;
+    out.push(sheet + SEP + parseInt(m[2], 10) + SEP + colToNum(m[1]));
+  });
+  return out;
+}
+
+function reachable(start, dependents, limit) {
+  var seen = {}, order = [start], i = 0;
+  seen[start] = 1;
+  limit = limit || 2000;
+  while (i < order.length && order.length < limit) {
+    var nb = dependents[order[i]] || [];
+    for (var j = 0; j < nb.length; j++)
+      if (!seen[nb[j]]) { seen[nb[j]] = 1; order.push(nb[j]); }
+    i++;
+  }
+  return seen;
+}
+
+/* Measure each finding by how far it moves the model's outputs. */
+function rankByOutputs(findings, left, right, inv, graph, outputs) {
+  var oset = {};
+  outputs.forEach(function (k) { oset[k] = 1; });
+
+  function outputMove(key) {
+    var p = key.split(SEP), sheet = p[0], r = +p[1], c = +p[2];
+    var maps = inv[sheet] || [{}, {}];
+    var rv = right[sheet] ? get(right[sheet], r, c).v : null;
+    var lr = maps[0][r], lc = maps[1][c];
+    var lv = (left[sheet] && lr && lc) ? get(left[sheet], lr, lc).v : null;
+    if (!isNum(rv) || !isNum(lv) || rv === lv) return null;
+    return [lv, rv, Math.round(Math.abs(rv - lv) / Math.max(Math.abs(lv), 1e-9) * 1e6) / 1e6];
+  }
+
+  findings.forEach(function (f) {
+    var m = CELLREF.exec(f.ref || "");
+    if (!m || !outputs.length) return;
+    var start = f.sheet + SEP + parseInt(m[2], 10) + SEP + colToNum(m[1]);
+    var seen = reachable(start, graph), hits = [];
+    Object.keys(oset).sort(cellOrder).forEach(function (key) {
+      if (!seen[key]) return;
+      var move = outputMove(key);
+      if (!move) return;
+      var p = key.split(SEP);
+      hits.push({ ref: cellLabel(key), label: rowLabel(right[p[0]], +p[1]),
+        before: fmt(move[0]), after: fmt(move[1]), move: move[2] });
+    });
+    hits.sort(function (a, b) { return (b.move - a.move) || (a.ref < b.ref ? -1 : 1); });
+    f.outputs = hits.slice(0, 5);
+    f.outputImpact = hits.length ? hits[0].move : 0;
+    f.onOutput = !!oset[start];
+  });
+}
 
 /* Give every cell finding the path from it to the number it moved. Impact
    findings already said a value moved with no edit to the cell. The graph is
@@ -477,6 +584,7 @@ function attachChains(findings, right, namesB) {
     f.downstream = r.count;
     f.chain = r.path.map(cellLabel);
   }
+  return graph;
 }
 
 function diffSheet(name, left, right, findings, align) {
@@ -626,7 +734,7 @@ function diffNames(a, b, findings) {
   });
 }
 
-function compare(wbA, wbB) {
+function compare(wbA, wbB, outputSpec) {
   var left = {}, right = {}, findings = [], align = {}, stale = false;
   var namesA = readNames(wbA), namesB = readNames(wbB);
   var upA = {}, upB = {};
@@ -665,16 +773,28 @@ function compare(wbA, wbB) {
       { detail: "Showing the " + IMPACT_CAP + " largest by relative change." }));
   }
 
-  attachChains(findings, right, namesB);
+  var graph = attachChains(findings, right, namesB);
+  var inv = buildInverse(align);
+  var declared = parseOutputSpec(outputSpec, right);
+  var picked = declared.length ? declared : detectOutputs(right, graph, left, inv);
+  rankByOutputs(findings, left, right, inv, graph, picked);
 
+  /* Severity first, then how far the change moved a model output, then whether
+     it sits on an output at all. That last one matters because a plug freezes a
+     number rather than moving it: the most dangerous finding in the tool
+     measures zero movement by construction, and without this it would sort
+     below every unrelated finding. */
   findings.sort(function (a, b) {
     return (SEV_ORDER[a.severity] - SEV_ORDER[b.severity]) ||
+      (b.outputImpact - a.outputImpact) ||
+      ((a.onOutput ? 0 : 1) - (b.onOutput ? 0 : 1)) ||
       (a.sheet < b.sheet ? -1 : a.sheet > b.sheet ? 1 : 0) ||
       ((a.rowRight || a.rowLeft) - (b.rowRight || b.rowLeft));
   });
 
   return { left: left, right: right, findings: findings, align: align, stale: stale,
-    names: [namesA, namesB] };
+    names: [namesA, namesB], outputs: picked.map(cellLabel),
+    outputsDeclared: declared.length > 0 };
 }
 
 root.xldiff = { compare: compare, toR1C1: toR1C1, fmt: fmt, colLetter: colLetter,

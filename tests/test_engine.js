@@ -78,6 +78,31 @@ check(growth.chain.length >= 3,
 check(s.findings.filter((f) => f.kind === "impact").every((f) => !f.chain.length),
   "impact findings carry no chain: they are the far end of someone else's");
 
+console.log("ranking against model outputs");
+check(s.outputs.length && !s.outputsDeclared,
+  "outputs are detected when none are declared (" + s.outputs.length + " found)");
+const ranked = s.findings.filter((f) => f.severity === "high");
+const impacts = ranked.map((f) => f.outputImpact);
+check(String(impacts) === String(impacts.slice().sort((a, b) => b - a)),
+  "high findings are ordered by how far they move an output");
+check(ranked[0].outputImpact > 0 && ranked[0].outputs.length,
+  "the finding at the top moves one: " + ranked[0].outputs[0].ref +
+  " by " + (ranked[0].outputImpact * 100).toFixed(1) + "%");
+
+// A plug freezes a number instead of moving it, so it measures zero by
+// construction, and without the on-output tiebreak it sorts below every
+// unrelated finding.
+const plug = ranked.find((f) => f.kind === "hardcode");
+check(plug.outputImpact === 0 && plug.onOutput,
+  "a plug moves nothing measurable but sits on an output");
+const inert = ranked.findIndex((f) => !f.onOutput && f.outputImpact === 0);
+check(inert >= 0 && ranked.indexOf(plug) < inert,
+  "and still outranks every high finding that moves nothing and sits on nothing");
+
+const declaredRun = xldiff.compare(sa, sb, ["'Revenue build'!B11"]);
+check(String(declaredRun.outputs) === "Revenue build!B11" && declaredRun.outputsDeclared,
+  "an explicit output list replaces detection entirely");
+
 console.log("defined names");
 const byKind = {};
 s.findings.forEach((f) => { if (!byKind[f.kind]) byKind[f.kind] = f; });

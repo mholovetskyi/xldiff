@@ -28,6 +28,10 @@ def main(argv=None):
     ap.add_argument("--json", dest="json_out")
     ap.add_argument("--fail-on", default="never",
                     choices=["high", "medium", "low", "never"])
+    ap.add_argument("--outputs", default="",
+                    help="cells to rank findings against, comma separated, "
+                         "e.g. \"Summary!B10,Model!C4\". Detected automatically "
+                         "if not given.")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
 
@@ -36,7 +40,8 @@ def main(argv=None):
             sys.stderr.write("no such file: %s\n" % p)
             return 2
 
-    result = compare(a.old, a.new)
+    declared = [x.strip() for x in a.outputs.split(",") if x.strip()]
+    result = compare(a.old, a.new, declared)
     findings = result["findings"]
     tty = sys.stdout.isatty()
 
@@ -63,6 +68,10 @@ def main(argv=None):
             if len(f.chain) > 1:
                 print("%s %-22s   moves %s"
                       % (" " * 6, "", "  ->  ".join(f.chain[1:])))
+            for o in f.outputs[:2]:
+                print("%s %-22s   %s %s: %s -> %s (%.1f%%)"
+                      % (" " * 6, "", o["ref"], o["label"] or "output",
+                         o["before"], o["after"], o["move"] * 100))
         if len(findings) > 40:
             print("... %d more, see the report" % (len(findings) - 40))
 
@@ -77,9 +86,12 @@ def main(argv=None):
             "before": f.before, "after": f.after,
             "value_before": f.val_before, "value_after": f.val_after,
             "chain": f.chain, "downstream": f.downstream,
+            "outputs": f.outputs, "output_impact": f.output_impact,
         } for f in findings]
         with open(a.json_out, "w", encoding="utf-8") as fh:
-            json.dump({"findings": payload, "stale_values": result["stale"]},
+            json.dump({"findings": payload, "stale_values": result["stale"],
+                       "outputs": result["outputs"],
+                       "outputs_declared": result["outputs_declared"]},
                       fh, indent=2)
 
     if a.fail_on != "never":

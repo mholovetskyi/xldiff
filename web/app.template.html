@@ -270,6 +270,8 @@ details>summary::-webkit-details-marker{display:none}
     <div class="verdict">
       <div class="mi">Verdict</div>
       <div class="hl" id="headline"></div>
+      <div id="moved" style="font-size:11.5px;margin-bottom:6px;display:flex;gap:7px;
+        align-items:baseline;flex-wrap:wrap" hidden></div>
       <div class="counts" id="counts"></div>
     </div>
 
@@ -542,6 +544,24 @@ function verdict(){
     head="These two files are identical.";
   }
   $("headline").textContent=head;
+
+  /* The largest move on a model output is the sentence someone repeats. It
+     goes under the verdict rather than in it, because it is a measurement and
+     the verdict is a judgement. */
+  var top=null;
+  f.forEach(function(x){ if(x.outputs&&x.outputs.length&&(!top||x.outputImpact>top.outputImpact)) top=x; });
+  if(top&&top.outputImpact>0){
+    var o=top.outputs[0];
+    $("moved").innerHTML='<span class="mi">Largest move</span> '+
+      '<span class="mo">'+esc(o.label||o.ref)+" "+esc(o.before)+" → "+esc(o.after)+
+      ' <span style="background:var(--color-accent-200);padding:0 3px">'+
+      (o.move*100).toFixed(1)+"%</span></span>"+
+      '<span class="mo dim"> from '+esc(top.sheet+"!"+top.ref)+"</span>";
+    $("moved").hidden=false;
+  }else{
+    $("moved").hidden=true;
+  }
+
   var nsheets=Object.keys(R.right).length;
   var bits=[nsheets+" sheet"+(nsheets===1?"":"s"), cells+" cells changed",
     c.high+" high", c.medium+" medium", c.low+" low",
@@ -744,6 +764,12 @@ function list(){
     if(f.sheet&&f.ref) b.appendChild(el("div","mi",esc(f.sheet)));
     b.appendChild(el("div","fi-d",esc(f.summary)));
     if(f.detail) b.appendChild(el("div","fi-d dim",esc(f.detail)));
+    if(f.outputs&&f.outputs.length&&f.outputImpact>0){
+      var o=f.outputs[0];
+      b.appendChild(el("div","mo",
+        '<span class="dim">moves</span> '+esc(o.label||o.ref)+" "+
+        (o.move*100).toFixed(1)+"%")).style.fontSize="10px";
+    }
     var d=diffStacked(f.before,f.after);
     if(d){var w=el("div");w.style.cssText="display:flex;flex-direction:column;gap:4px";
       w.innerHTML=d;b.appendChild(w);}

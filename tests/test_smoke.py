@@ -100,6 +100,35 @@ def main():
     check(all(not f.chain for f in impacts),
           "impact findings carry no chain: they are the far end of someone else's")
 
+    print("ranking against model outputs")
+    check(sample["outputs"] and not sample["outputs_declared"],
+          "outputs are detected when none are declared (%d found)" % len(sample["outputs"]))
+    ranked = [f for f in sample["findings"] if f.severity == "high"]
+    impacts = [f.output_impact for f in ranked]
+    check(impacts == sorted(impacts, reverse=True),
+          "high findings are ordered by how far they move an output")
+    top = ranked[0]
+    check(top.output_impact > 0 and top.outputs,
+          "the finding at the top moves one: %s by %.1f%%"
+          % (top.outputs[0]["ref"], top.output_impact * 100))
+
+    # A plug freezes a number instead of moving it, so it measures zero by
+    # construction. Without the on-output tiebreak it sorts below every
+    # unrelated finding, which is the wrong end of the list for the single
+    # most dangerous thing the tool looks for.
+    plug = [f for f in ranked if f.kind == "hardcode"][0]
+    check(plug.output_impact == 0 and plug.on_output,
+          "a plug moves nothing measurable but sits on an output")
+    inert = [i for i, f in enumerate(ranked)
+             if not f.on_output and f.output_impact == 0]
+    check(inert and ranked.index(plug) < min(inert),
+          "and still outranks every high finding that moves nothing and sits "
+          "on nothing")
+
+    declared = compare(SA, SB, ["'Revenue build'!B11"])
+    check(declared["outputs"] == ["Revenue build!B11"] and declared["outputs_declared"],
+          "an explicit output list replaces detection entirely")
+
     print("defined names")
     kinds = dict((f.kind, f) for f in sample["findings"])
     check("name_changed" in kinds and kinds["name_changed"].ref == "GrowthRate",
