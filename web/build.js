@@ -17,6 +17,8 @@ out = out
   .replace("__XLSX__", () => fs.readFileSync(sheetjs, "utf8"))
   .replace("__ENGINE__", () => fs.readFileSync(path.join(here, "engine.js"), "utf8"));
 
-const dest = path.join(here, "index.html");
+/* The built file lives at the repository root: that is the copy Pages serves
+   and the copy tests/test_engine.js checks for drift. */
+const dest = path.join(here, "..", "index.html");
 fs.writeFileSync(dest, out);
 console.log("wrote %s (%d KB)", dest, Math.round(out.length / 1024));

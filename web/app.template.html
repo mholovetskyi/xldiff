@@ -3,121 +3,352 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>xldiff — compare two Excel models</title>
 <style>
-:root{--bg:#fbfaf8;--card:#fff;--line:#e4e1da;--txt:#26241f;--dim:#6d6a63;
---hi:#fcebeb;--hib:#A32D2D;--me:#faeeda;--meb:#854F0B;--lo:#e6f1fb;--lob:#185FA5;--ok:#3B6D11}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);
-font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
-.wrap{max-width:1200px;margin:0 auto;padding:28px 24px 60px}
-h1{font-size:22px;font-weight:500;margin:0 0 4px}
-.sub{color:var(--dim);font-size:13px;margin-bottom:22px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.drops{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
-.drop{background:var(--card);border:1.5px dashed var(--line);border-radius:10px;padding:26px 18px;
-text-align:center;cursor:pointer;transition:border-color .12s,background .12s}
-.drop:hover,.drop.over{border-color:#a8a49b;background:#f7f5f1}
-.drop.set{border-style:solid;border-color:var(--ok);background:#f4f9ec}
-.drop .lab{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
-.drop .fn{font-size:13px;word-break:break-all}
-.drop .hint{font-size:12px;color:var(--dim);margin-top:4px}
-button{font:inherit;padding:8px 18px;border-radius:7px;border:1px solid var(--txt);
-background:var(--txt);color:#fff;cursor:pointer}
-button[disabled]{background:#dedad2;border-color:#dedad2;color:#8d8981;cursor:default}
-button.ghost{background:transparent;color:var(--txt);border-color:var(--line)}
-.row{display:flex;gap:10px;align-items:center}
-.bar{display:flex;gap:6px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.tab{padding:4px 10px;border-radius:6px;font-size:13px;cursor:pointer;border:1px solid transparent}
-.tab.on{background:var(--bg);border-color:var(--line)}
-.tab .n{color:var(--dim);font-size:11px;margin-left:5px}
-.tab.added{background:#eaf3de;color:var(--ok)}.tab.deleted{background:var(--hi);color:var(--hib)}
-.seg{display:flex;gap:4px;margin-left:8px}
-.seg span{padding:4px 10px;font-size:12px;border:1px solid var(--line);border-radius:6px;cursor:pointer}
-.seg span.on{background:var(--txt);color:#fff;border-color:var(--txt)}
-.panes{display:grid;grid-template-columns:1fr 1fr}
-.pane{overflow:auto;max-height:520px;border-right:1px solid var(--line)}
-.pane:last-child{border-right:none}
-.ph{position:sticky;top:0;background:var(--card);border-bottom:1px solid var(--line);
-padding:6px 10px;font-size:11px;color:var(--dim);z-index:2}
-table{border-collapse:collapse;width:100%;font:11px/1.9 ui-monospace,SFMono-Regular,Menlo,monospace}
-td{padding:0 6px;white-space:nowrap;border-bottom:1px solid #f2f0eb;max-width:150px;overflow:hidden;text-overflow:ellipsis}
-td.rn{color:#a8a49b;text-align:right;width:34px;background:#faf9f6;position:sticky;left:0}
-tr.gap td{background:#f4f2ed;color:#a8a49b;text-align:center;font-size:10px;padding:1px}
-tr.added td{background:#f2f8e9}tr.deleted td{background:#fdf1f1}
-td.high{background:var(--hi);color:var(--hib)}
-td.medium{background:var(--me);color:var(--meb)}
-td.low{background:var(--lo);color:var(--lob)}
-tr.focus td{outline:1px solid #26241f;outline-offset:-1px}
-.f{display:flex;gap:10px;padding:11px 12px;border-bottom:1px solid var(--line);cursor:pointer;align-items:flex-start}
-.f:hover{background:#f4f2ed}
-.dot{width:7px;height:7px;border-radius:50%;margin-top:7px;flex:none}
-.f .d{color:var(--dim);font-size:12px}
-.f .code{font:11px ui-monospace,Menlo,monospace;color:var(--dim);margin-top:3px;white-space:pre-wrap}
-.ref{font:11px ui-monospace,Menlo,monospace;color:var(--dim)}
-.warn{background:var(--me);color:var(--meb);padding:9px 12px;font-size:12px;border-radius:8px;margin-bottom:14px}
-.err{background:var(--hi);color:var(--hib);padding:9px 12px;font-size:12px;border-radius:8px;margin-bottom:14px}
-.foot{color:var(--dim);font-size:12px;margin-top:20px}
-.hide{display:none}
-.badge{font-size:11px;color:var(--ok);border:1px solid #c9dfa8;background:#f4f9ec;
-padding:2px 8px;border-radius:20px}
-</style></head><body><div class="wrap">
+/* ══════════════════════════════════════════════════════════════════════════
+   Industry design system — tokens lifted from the design project's
+   styles.css. The webfont @import that ships with Industry is deliberately
+   NOT reproduced here: this file must make no network request at all, so
+   Barlow is declared and used if the reader happens to have it, and the
+   stack falls back to a condensed system face otherwise.
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  --color-bg:#f2f2f3;
+  --color-surface:#e9e9ea;
+  --color-text:#1d1f20;
+  --color-accent:#5980a6;
+  --color-divider:color-mix(in srgb,#1d1f20 16%,transparent);
 
-<h1>xldiff</h1>
-<div class="sub">Compare two Excel models. See what changed, what got hardcoded, and what moved downstream.
-<span class="badge">files never leave this browser</span></div>
+  --color-accent-100:#eef6ff;
+  --color-accent-200:#d6ebff;
+  --color-accent-300:#b5d9fd;
+  --color-accent-400:#94bce3;
+  --color-accent-600:#597ea3;
+  --color-accent-700:#416180;
+  --color-accent-800:#2c455d;
+  --color-accent-900:#1d2d3d;
 
+  --font-heading:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --font-body:"Barlow",system-ui,-apple-system,"Segoe UI",Helvetica,sans-serif;
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+
+  --space-1:3.4px; --space-2:6.8px; --space-3:10.2px;
+  --space-4:13.6px; --space-6:20.4px; --space-8:27.2px;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--color-bg);color:var(--color-text);
+  font-family:var(--font-body);font-size:15px;line-height:1.55}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+::selection{background:color-mix(in srgb,var(--color-accent) 30%,transparent)}
+[hidden]{display:none !important}
+
+/* — shared atoms from the wireframe — */
+.mi{font-size:9.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  color:color-mix(in srgb,var(--color-text) 48%,transparent)}
+.mo{font-family:var(--font-mono)}
+.hd{font-family:var(--font-heading);font-weight:600;letter-spacing:.01em}
+.dim{color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+
+/* — blueprint frame: square, hairline, registration marks — */
+.bpx{position:relative;border:1px solid var(--color-divider);border-radius:0}
+.bpx::before{content:"";position:absolute;inset:-6px;pointer-events:none;
+  --m:color-mix(in srgb,#1d1f20 45%,transparent);
+  background:
+    linear-gradient(var(--m),var(--m)) 5px 0/1px 11px no-repeat,
+    linear-gradient(var(--m),var(--m)) calc(100% - 5px) 0/1px 11px no-repeat,
+    linear-gradient(var(--m),var(--m)) 5px 100%/1px 11px no-repeat,
+    linear-gradient(var(--m),var(--m)) calc(100% - 5px) 100%/1px 11px no-repeat,
+    linear-gradient(var(--m),var(--m)) 0 5px/11px 1px no-repeat,
+    linear-gradient(var(--m),var(--m)) 100% 5px/11px 1px no-repeat,
+    linear-gradient(var(--m),var(--m)) 0 calc(100% - 5px)/11px 1px no-repeat,
+    linear-gradient(var(--m),var(--m)) 100% calc(100% - 5px)/11px 1px no-repeat}
+
+/* — controls — */
+.tbtn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  padding:5px 10px;border:1px solid var(--color-divider);background:transparent;
+  color:var(--color-text);font-family:var(--font-heading);font-weight:600;
+  font-size:11.5px;letter-spacing:.03em;border-radius:0;cursor:pointer}
+.tbtn:hover{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+.tbtn:active{background:color-mix(in srgb,var(--color-text) 14%,transparent)}
+.tbtn.pr{background:var(--color-accent);border-color:var(--color-accent);color:var(--color-bg)}
+.tbtn.pr:hover{background:var(--color-accent-600)}
+.tbtn.pr:active{background:var(--color-accent-700)}
+.tbtn[disabled]{opacity:.45;cursor:not-allowed}
+.tbtn[disabled]:hover{background:transparent}
+.tbtn.pr[disabled]:hover{background:var(--color-accent)}
+
+.sg{display:inline-flex;border:1px solid var(--color-divider)}
+.sg button{padding:5px 11px;font-family:var(--font-heading);font-weight:600;
+  font-size:11.5px;letter-spacing:.03em;background:transparent;color:var(--color-text);
+  border:0;border-radius:0;cursor:pointer}
+.sg button+button{border-left:1px solid var(--color-divider)}
+.sg button:hover:not(.on){background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+.sg button.on{background:var(--color-accent);color:var(--color-bg)}
+
+/* — severity: mono palette, contrast carries the rank — */
+.sv{display:inline-flex;align-items:center;font-family:var(--font-mono);
+  font-size:8.5px;letter-spacing:.09em;padding:2px 5px;flex:none;white-space:nowrap}
+.sv-high{background:var(--color-accent-900);color:var(--color-bg)}
+.sv-medium{background:var(--color-accent-200);color:var(--color-accent-800)}
+.sv-low{border:1px solid color-mix(in srgb,var(--color-text) 20%,transparent);
+  color:color-mix(in srgb,var(--color-text) 48%,transparent)}
+
+/* — toolbar — */
+.tb{display:flex;align-items:center;gap:14px;padding:9px 14px;
+  border-bottom:1px solid var(--color-divider);flex-wrap:wrap}
+.brand{font-family:var(--font-heading);font-weight:600;font-size:15px;letter-spacing:.06em}
+.fchip{display:flex;align-items:center;gap:7px;padding:4px 9px;
+  border:1px solid var(--color-divider);font-family:var(--font-mono);font-size:10.5px;
+  max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fchip i{width:5px;height:5px;background:var(--color-accent);flex:none}
+
+/* — verdict header (1a) — */
+.verdict{padding:20px 22px 18px;border-bottom:1px solid var(--color-divider)}
+.verdict .hl{font-family:var(--font-heading);font-weight:600;font-size:29px;
+  line-height:1.1;letter-spacing:.01em;margin:7px 0 8px}
+.verdict .counts{font-family:var(--font-mono);font-size:11px;
+  color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+
+/* — sheet ribbon — */
+.rib{display:flex;align-items:stretch;border-bottom:1px solid var(--color-divider);
+  background:var(--color-surface);overflow-x:auto}
+.rib button{padding:6px 12px;font-size:11px;font-family:inherit;color:inherit;
+  border:0;border-right:1px solid var(--color-divider);background:transparent;
+  display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer}
+.rib button:hover:not(.on){background:color-mix(in srgb,var(--color-text) 5%,transparent)}
+.rib button.on{background:var(--color-bg);box-shadow:inset 0 -2px 0 var(--color-accent)}
+.rib button.gone{text-decoration:line-through;opacity:.5}
+.rib b{font-family:var(--font-mono);font-size:9px;padding:1px 4px;font-weight:400;
+  background:var(--color-accent-200);color:var(--color-accent-800)}
+
+/* — findings list — */
+.fi{display:flex;flex-direction:column;gap:6px;padding:10px 12px;width:100%;
+  border:0;border-bottom:1px solid var(--color-divider);background:transparent;
+  font:inherit;color:inherit;text-align:left;cursor:pointer}
+.fi:hover{background:color-mix(in srgb,var(--color-text) 4%,transparent)}
+.fi.on{background:var(--color-accent-100);box-shadow:inset 2px 0 0 var(--color-accent)}
+.fi.off{opacity:.42}
+.fi-t{display:flex;align-items:center;gap:8px;width:100%}
+.fi-r{font-family:var(--font-mono);font-size:11px;font-weight:700}
+.fi-d{font-size:11.5px;line-height:1.4}
+
+/* — formula diff (1o) — */
+.fx{font-family:var(--font-mono);font-size:10.5px;padding:4px 7px;
+  border:1px solid var(--color-divider);white-space:pre-wrap;word-break:break-all}
+.fx.was{color:color-mix(in srgb,var(--color-text) 55%,transparent);
+  text-decoration:line-through;
+  text-decoration-color:color-mix(in srgb,var(--color-text) 35%,transparent)}
+.tok{background:var(--color-accent);color:var(--color-bg);padding:0 2px}
+.tokd{background:color-mix(in srgb,var(--color-text) 14%,transparent);padding:0 2px;
+  text-decoration:line-through}
+
+/* — grid — */
+.gr{display:grid;font-family:var(--font-mono);font-size:10px;line-height:1;
+  min-width:max-content}
+.gr>span{padding:5px 6px;border-right:1px solid color-mix(in srgb,var(--color-text) 9%,transparent);
+  border-bottom:1px solid color-mix(in srgb,var(--color-text) 9%,transparent);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gh{background:var(--color-surface);font-size:9px;text-align:center;
+  color:color-mix(in srgb,var(--color-text) 50%,transparent)}
+.nu{text-align:right}
+.chg{background:var(--color-accent-200)}
+.sel{background:var(--color-accent);color:var(--color-bg)}
+.gap{background:repeating-linear-gradient(135deg,transparent 0 3px,
+  color-mix(in srgb,var(--color-text) 11%,transparent) 3px 4px)}
+.elide{grid-column:1/-1;text-align:center;color:color-mix(in srgb,var(--color-text) 38%,transparent);
+  padding:2px 0;background:color-mix(in srgb,var(--color-text) 3%,transparent)}
+.cellbtn{cursor:pointer}
+.cellbtn:hover{box-shadow:inset 0 0 0 1px var(--color-accent)}
+.bar{display:inline-block;height:6px;background:var(--color-accent);vertical-align:middle;
+  margin-left:4px}
+
+/* — warning band: the one place the accent takes a full field — */
+.warn{display:flex;align-items:center;gap:10px;padding:8px 12px;
+  background:var(--color-accent-900);color:var(--color-bg);font-size:11.5px}
+.warn .sv{background:var(--color-bg);color:var(--color-accent-900)}
+
+/* — layout — */
+.page{max-width:1440px;margin:0 auto;padding:34px 30px 60px}
+.wf{background:var(--color-bg);display:flex;flex-direction:column}
+.split{display:flex;align-items:stretch;min-height:392px}
+.flist{width:296px;flex:none;border-right:1px solid var(--color-divider);
+  display:flex;flex-direction:column;max-height:560px}
+.flist-h{padding:9px 12px;border-bottom:1px solid var(--color-divider);
+  display:flex;align-items:center;gap:8px;flex:none}
+.flist-b{overflow-y:auto}
+.panes{flex:1;display:flex;flex-direction:column;min-width:0}
+.paner{display:flex;align-items:stretch;flex:1;min-width:0}
+.pane{flex:1;min-width:0;display:flex;flex-direction:column}
+.pane+.pane{border-left:1px solid var(--color-divider)}
+.pane-h{padding:7px 10px;border-bottom:1px solid var(--color-divider);
+  display:flex;gap:8px;align-items:baseline;flex:none}
+.pane-b{overflow:auto;max-height:430px}
+.strip{border-top:1px solid var(--color-divider);padding:11px 14px;
+  display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap}
+
+/* — landing (1g) — */
+.drops{display:flex;gap:14px}
+.drop{flex:1;border:1px solid var(--color-divider);border-style:dashed;
+  padding:22px 12px;text-align:center;display:flex;flex-direction:column;gap:7px;
+  align-items:center;cursor:pointer;background:transparent}
+.drop:hover,.drop.over{background:color-mix(in srgb,var(--color-text) 5%,transparent)}
+.drop.set{border-style:solid;background:var(--color-accent-100)}
+
+/* — export dialog (1l) — */
+.backdrop{position:fixed;inset:0;display:grid;place-items:center;padding:20px;z-index:10;
+  background:color-mix(in srgb,#2b2b2d 50%,transparent)}
+.opt{display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--color-divider);
+  align-items:flex-start;cursor:pointer}
+.opt:hover{background:color-mix(in srgb,var(--color-text) 4%,transparent)}
+.opt input{position:absolute;opacity:0;width:0;height:0}
+.dot{width:15px;height:15px;flex:none;margin-top:3px;border-radius:50%;
+  border:1.5px solid var(--color-divider)}
+.opt input:checked+.dot{border-color:var(--color-accent);background:var(--color-accent);
+  box-shadow:inset 0 0 0 4px var(--color-bg)}
+.opt input:focus-visible+.dot{outline:2px solid var(--color-accent);outline-offset:2px}
+.chk .dot{border-radius:0}
+.chk input:checked+.dot{box-shadow:inset 0 0 0 3px var(--color-bg)}
+details>summary{cursor:pointer;font-size:10.5px;font-family:var(--font-mono);
+  color:var(--color-accent-700);list-style:none}
+details>summary::-webkit-details-marker{display:none}
+</style></head><body>
+<div class="page">
+
+<!-- ══ 1g · landing / drop zone ══════════════════════════════════════════ -->
 <div id="setup">
-  <div class="drops">
-    <div class="drop" id="dropA"><div class="lab">Before</div>
-      <div class="fn" id="nameA">drop an .xlsx here</div>
-      <div class="hint">or click to choose</div></div>
-    <div class="drop" id="dropB"><div class="lab">After</div>
-      <div class="fn" id="nameB">drop an .xlsx here</div>
-      <div class="hint">or click to choose</div></div>
-  </div>
-  <input type="file" id="fileA" accept=".xlsx,.xlsm" class="hide">
-  <input type="file" id="fileB" accept=".xlsx,.xlsm" class="hide">
-  <div class="row"><button id="go" disabled>Compare</button>
-    <span class="ref" id="status"></span></div>
-  <div id="setupmsg"></div>
-</div>
-
-<div id="results" class="hide">
-  <div class="row" style="margin-bottom:14px">
-    <div class="sub" id="summary" style="margin:0"></div>
-    <button class="ghost" id="reset" style="margin-left:auto">Compare different files</button>
-  </div>
-  <div id="warn"></div>
-  <div class="card">
-    <div class="bar" id="tabs"></div>
-    <div class="bar">
-      <span style="font-size:12px;color:var(--dim)">View</span>
-      <div class="seg"><span data-layer="values">Values</span><span data-layer="formulas" class="on">Formulas</span></div>
+  <div class="wf bpx" style="max-width:600px;margin:0 auto">
+    <div class="tb"><span class="brand">XLDIFF</span></div>
+    <div style="padding:20px 22px 16px;border-bottom:1px solid var(--color-divider)">
+      <div class="hd" style="font-size:22px;line-height:1.15;margin-bottom:5px">Compare two Excel models</div>
+      <div style="font-size:12.5px;line-height:1.55;color:color-mix(in srgb,var(--color-text) 62%,transparent)">Formulas, hardcodes, and the numbers they moved. Runs in this browser; the files are not uploaded.</div>
     </div>
-    <div class="panes">
-      <div class="pane" id="paneL"><div class="ph" id="hl"></div><table id="tl"></table></div>
-      <div class="pane" id="paneR"><div class="ph" id="hr"></div><table id="tr_"></table></div>
+    <div style="padding:22px">
+      <div class="drops">
+        <div class="drop" id="dropA" tabindex="0" role="button" aria-label="Choose the baseline workbook">
+          <span class="mi">Baseline</span>
+          <span class="hd" style="font-size:15px" id="nameA">Drop the old file</span>
+          <span class="mo dim" style="font-size:10px" id="metaA">.xlsx · .xlsm</span>
+        </div>
+        <div class="drop" id="dropB" tabindex="0" role="button" aria-label="Choose the revised workbook">
+          <span class="mi">Revised</span>
+          <span class="hd" style="font-size:15px" id="nameB">Drop the new file</span>
+          <span class="mo dim" style="font-size:10px" id="metaB">.xlsx · .xlsm</span>
+        </div>
+      </div>
+      <input type="file" id="fileA" accept=".xlsx,.xlsm" hidden>
+      <input type="file" id="fileB" accept=".xlsx,.xlsm" hidden>
+      <div style="display:flex;align-items:center;gap:11px;margin-top:20px;flex-wrap:wrap">
+        <button class="tbtn pr" id="go" style="padding:8px 18px;font-size:13px" disabled>Compare</button>
+        <span class="mo dim" style="font-size:10px">or run <span style="color:var(--color-accent-700)">python cli/cli.py old.xlsx new.xlsx</span> in a terminal</span>
+      </div>
+      <div id="setupmsg" style="margin-top:14px"></div>
     </div>
   </div>
-  <div class="card" style="margin-top:18px"><div id="findings"></div></div>
-  <div class="foot">Findings are ordered by severity, then position. Click one to jump to it.</div>
-</div>
 </div>
 
+<!-- ══ 1b + 1a · the review surface ═══════════════════════════════════════ -->
+<div id="review" hidden>
+  <div class="wf bpx">
+    <div class="tb">
+      <span class="brand">XLDIFF</span>
+      <span class="fchip"><i></i><span id="chipA"></span></span>
+      <span class="mi">vs</span>
+      <span class="fchip"><i style="background:var(--color-accent-700)"></i><span id="chipB"></span></span>
+      <span class="mo dim" style="font-size:10.5px" id="cursor"></span>
+      <span style="margin-left:auto"></span>
+      <span class="sg" id="layers" role="group" aria-label="Cell layer">
+        <button data-layer="values">Values</button>
+        <button data-layer="formulas" class="on">Formulas</button>
+        <button data-layer="impact">Impact</button>
+      </span>
+      <button class="tbtn" id="supbtn" hidden></button>
+      <button class="tbtn" id="rerun">Re-run</button>
+      <button class="tbtn pr" id="exportbtn">Export</button>
+    </div>
+
+    <div id="warnband"></div>
+
+    <div class="verdict">
+      <div class="mi">Verdict</div>
+      <div class="hl" id="headline"></div>
+      <div class="counts" id="counts"></div>
+    </div>
+
+    <div class="rib" id="ribbon"></div>
+
+    <div class="split">
+      <div class="flist">
+        <div class="flist-h">
+          <span class="mi" id="fcount"></span>
+          <span class="mo dim" style="margin-left:auto;font-size:10px">Severity ▾</span>
+        </div>
+        <div class="flist-b" id="findings"></div>
+      </div>
+      <div class="panes">
+        <div class="paner">
+          <div class="pane">
+            <div class="pane-h"><span class="mi">Baseline</span><span class="mo dim" style="font-size:10px" id="hl_"></span></div>
+            <div class="pane-b" id="paneL"></div>
+          </div>
+          <div class="pane">
+            <div class="pane-h"><span class="mi" style="color:var(--color-accent-700)">Revised</span><span class="mo dim" style="font-size:10px" id="hr_"></span></div>
+            <div class="pane-b" id="paneR"></div>
+          </div>
+        </div>
+        <div class="strip" id="strip"></div>
+      </div>
+    </div>
+  </div>
+  <p class="mo dim" style="font-size:11px;margin-top:22px">Findings are ordered by severity, then position. Selecting one moves both panes to it.</p>
+</div>
+
+<!-- ══ 1l · export ════════════════════════════════════════════════════════ -->
+<div class="backdrop" id="exportdlg" hidden>
+  <div class="wf bpx" style="width:420px;max-width:100%;background:var(--color-bg)">
+    <div style="padding:12px 14px;border-bottom:1px solid var(--color-divider)">
+      <div class="hd" style="font-size:18px">Export this review</div>
+      <div class="mo dim" style="font-size:10px;margin-top:2px" id="exportmeta"></div>
+    </div>
+    <label class="opt"><input type="radio" name="xf" value="html" checked><span class="dot"></span>
+      <span><span class="hd" style="font-size:13.5px;display:block">Self-contained HTML</span>
+      <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">One file, no assets, opens offline and reads without scripting.</span></span></label>
+    <label class="opt"><input type="radio" name="xf" value="json"><span class="dot"></span>
+      <span><span class="hd" style="font-size:13.5px;display:block">JSON</span>
+      <span style="font-size:11px;color:color-mix(in srgb,var(--color-text) 60%,transparent)">Same findings, machine-readable. What a CI gate reads.</span></span></label>
+    <div style="padding:11px 14px;border-bottom:1px solid var(--color-divider)">
+      <label class="opt chk" style="padding:0;border:0;gap:9px"><input type="checkbox" id="xsup"><span class="dot"></span>
+        <span style="font-size:12px">Include suppressed findings</span></label>
+    </div>
+    <div style="padding:12px 14px;display:flex;align-items:center;gap:10px">
+      <button class="tbtn pr" id="xgo" style="padding:7px 16px">Save file</button>
+      <button class="tbtn" id="xcancel">Cancel</button>
+      <span class="mo dim" style="font-size:10px;margin-left:auto">Written to disk. Never uploaded.</span>
+    </div>
+  </div>
+</div>
+
+</div>
 <script>__XLSX__</script>
 <script>__ENGINE__</script>
 <script>
 (function(){
 "use strict";
-var CONTEXT=2, MAX_COLS=12;
-var SEVC={high:"#A32D2D",medium:"#854F0B",low:"#185FA5"};
+
+var CONTEXT=2, MAX_COLS=14;
 var files={A:null,B:null}, R=null, sheets=[], active=0, layer="formulas";
+var sel=null, suppressed={}, tokenView=false, showSup=true;
 
 function $(id){return document.getElementById(id);}
-function esc(s){return String(s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];});}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+function el(tag,cls,html){var e=document.createElement(tag);
+  if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e;}
 
+/* ── landing ─────────────────────────────────────────────────────────── */
 function wire(slot){
   var zone=$("drop"+slot), input=$("file"+slot);
-  zone.onclick=function(){input.click();};
+  function pick(){input.click();}
+  zone.onclick=pick;
+  zone.onkeydown=function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();pick();}};
   zone.ondragover=function(e){e.preventDefault();zone.classList.add("over");};
   zone.ondragleave=function(){zone.classList.remove("over");};
   zone.ondrop=function(e){e.preventDefault();zone.classList.remove("over");
@@ -126,17 +357,29 @@ function wire(slot){
 }
 function take(slot,file){
   if(!/\.(xlsx|xlsm)$/i.test(file.name)){
-    $("setupmsg").innerHTML='<div class="err">'+esc(file.name)+
+    $("setupmsg").innerHTML='<div class="warn">'+esc(file.name)+
       " is not an .xlsx or .xlsm file. xldiff reads Excel workbooks only.</div>";
     return;
   }
   files[slot]=file;
   $("name"+slot).textContent=file.name;
+  $("meta"+slot).textContent=(file.size/1048576).toFixed(1)+" MB · ready";
   $("drop"+slot).classList.add("set");
   $("go").disabled=!(files.A&&files.B);
   $("setupmsg").innerHTML="";
 }
-
+function readOne(file){
+  return new Promise(function(res,rej){
+    var fr=new FileReader();
+    fr.onload=function(){
+      try{res(XLSX.read(new Uint8Array(fr.result),
+        {type:"array",cellFormula:true,cellNF:false,cellStyles:false}));}
+      catch(e){rej(new Error(file.name+" could not be read as a workbook."));}
+    };
+    fr.onerror=function(){rej(new Error("Could not read "+file.name));};
+    fr.readAsArrayBuffer(file);
+  });
+}
 function countFormulas(side){
   var n=0;
   for(var s in side) for(var k in side[s].cells){
@@ -145,46 +388,194 @@ function countFormulas(side){
   }
   return n;
 }
-
-function readOne(file){
-  return new Promise(function(res,rej){
-    var fr=new FileReader();
-    fr.onload=function(){
-      try{res(XLSX.read(new Uint8Array(fr.result),{type:"array",cellFormula:true,cellNF:false,cellStyles:false}));}
-      catch(e){rej(new Error(file.name+" could not be read as a workbook."));}
-    };
-    fr.onerror=function(){rej(new Error("Could not read "+file.name));};
-    fr.readAsArrayBuffer(file);
-  });
-}
-
 $("go").onclick=function(){
-  $("status").textContent="reading…";$("go").disabled=true;
+  $("go").disabled=true; $("go").textContent="Reading…";
   Promise.all([readOne(files.A),readOne(files.B)]).then(function(wbs){
-    $("status").textContent="comparing…";
+    $("go").textContent="Comparing…";
     setTimeout(function(){
       try{
         R=xldiff.compare(wbs[0],wbs[1]);
         if(!countFormulas(R.left)&&!countFormulas(R.right))
           throw new Error("Neither workbook contains any formulas. xldiff compares models, so there is nothing here it can reason about.");
         show();
-      }
-      catch(e){ fail(e); }
+      }catch(e){fail(e);}
     },10);
   }).catch(fail);
 };
 function fail(e){
-  $("status").textContent="";$("go").disabled=false;
-  $("setupmsg").innerHTML='<div class="err">'+esc(e.message||String(e))+"</div>";
+  $("go").disabled=false; $("go").textContent="Compare";
+  $("setupmsg").innerHTML='<div class="warn">'+esc(e.message||String(e))+"</div>";
 }
-$("reset").onclick=function(){
-  files={A:null,B:null};R=null;
-  ["A","B"].forEach(function(s){$("drop"+s).classList.remove("set");
-    $("name"+s).textContent="drop an .xlsx here";$("file"+s).value="";});
-  $("go").disabled=true;$("status").textContent="";
-  $("results").classList.add("hide");$("setup").classList.remove("hide");
+$("rerun").onclick=function(){
+  files={A:null,B:null}; R=null; sel=null; suppressed={};
+  ["A","B"].forEach(function(s){
+    $("drop"+s).classList.remove("set");
+    $("name"+s).textContent=s==="A"?"Drop the old file":"Drop the new file";
+    $("meta"+s).textContent=".xlsx · .xlsm";
+    $("file"+s).value="";});
+  $("go").disabled=true; $("go").textContent="Compare";
+  $("review").hidden=true; $("setup").hidden=false;
 };
 
+/* ── formula tokenising and diff (1o) ────────────────────────────────── */
+var TOKEN=/(\$?[A-Za-z]{1,3}\$?[0-9]+(?::\$?[A-Za-z]{1,3}\$?[0-9]+)?|[A-Za-z_][A-Za-z0-9_.]*|"[^"]*"|[0-9]+(?:\.[0-9]+)?|\s+|.)/g;
+function tokenize(f){
+  if(!f) return [];
+  var out=[],m;
+  TOKEN.lastIndex=0;
+  while((m=TOKEN.exec(f))!==null){ out.push(m[0]); if(m.index===TOKEN.lastIndex)TOKEN.lastIndex++; }
+  return out;
+}
+/* LCS over token arrays; returns per-token ops for both sides. */
+function tokenDiff(a,b){
+  var n=a.length,m=b.length;
+  if(n*m>40000){ return {l:a.map(function(t){return[t,n?"d":"="];}),
+                        r:b.map(function(t){return[t,m?"a":"="];})}; }
+  var w=m+1, dp=new Int32Array((n+1)*w);
+  for(var i=n-1;i>=0;i--) for(var j=m-1;j>=0;j--)
+    dp[i*w+j]=a[i]===b[j]?dp[(i+1)*w+j+1]+1:Math.max(dp[(i+1)*w+j],dp[i*w+j+1]);
+  var L=[],Rr=[],x=0,y=0;
+  while(x<n&&y<m){
+    if(a[x]===b[y]){L.push([a[x],"="]);Rr.push([b[y],"="]);x++;y++;}
+    else if(dp[(x+1)*w+y]>=dp[x*w+y+1]){L.push([a[x],"d"]);x++;}
+    else {Rr.push([b[y],"a"]);y++;}
+  }
+  while(x<n){L.push([a[x],"d"]);x++;}
+  while(y<m){Rr.push([b[y],"a"]);y++;}
+  return {l:L,r:Rr};
+}
+function renderTokens(ops,mark){
+  return ops.map(function(o){
+    if(o[1]==="=") return esc(o[0]);
+    return '<span class="'+(mark==="d"?"tokd":"tok")+'">'+esc(o[0])+"</span>";
+  }).join("");
+}
+/* 1o pattern A — stacked was/now with the changed token highlighted. */
+function diffStacked(before,after){
+  if(!before&&!after) return "";
+  var d=tokenDiff(tokenize(before),tokenize(after));
+  var h="";
+  if(before) h+='<div class="fx was">'+renderTokens(d.l,"d")+"</div>";
+  if(after)  h+='<div class="fx">'+renderTokens(d.r,"a")+"</div>";
+  return h;
+}
+/* 1o pattern C — two columns, aligned with the panes above. */
+function diffColumns(before,after){
+  var d=tokenDiff(tokenize(before),tokenize(after));
+  return '<div style="display:flex;border:1px solid var(--color-divider)">'+
+    '<div style="flex:1;min-width:0;padding:8px;border-right:1px solid var(--color-divider)">'+
+      '<div class="mi" style="margin-bottom:5px">Baseline</div>'+
+      '<div class="fx was" style="border:0;padding:0">'+(before?renderTokens(d.l,"d"):"<span class=dim>empty</span>")+"</div></div>"+
+    '<div style="flex:1;min-width:0;padding:8px">'+
+      '<div class="mi" style="margin-bottom:5px;color:var(--color-accent-700)">Revised</div>'+
+      '<div class="fx" style="border:0;padding:0">'+(after?renderTokens(d.r,"a"):"<span class=dim>empty</span>")+"</div></div></div>";
+}
+/* 1o pattern D — token table, behind a disclosure. */
+function diffTokenTable(before,after){
+  var a=tokenize(before).filter(function(t){return t.trim();});
+  var b=tokenize(after).filter(function(t){return t.trim();});
+  var rows="",n=Math.max(a.length,b.length);
+  for(var i=0;i<n;i++){
+    var x=a[i]||"",y=b[i]||"",same=x===y;
+    rows+='<span style="opacity:.45">'+(i+1)+"</span>"+
+      "<span"+(same?"":' class="tokd"')+">"+esc(x)+"</span>"+
+      "<span"+(same?"":' class="tok"')+">"+esc(y)+"</span>";
+  }
+  return '<div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:4px 10px;'+
+    'font-family:var(--font-mono);font-size:10px;align-items:center;margin-top:8px">'+
+    '<span class="mi"></span><span class="mi">Baseline</span><span class="mi">Revised</span>'+rows+"</div>";
+}
+
+/* ── run analysis (reconstructed from the grid, as the engine does) ───── */
+function runAnalysis(sheet,ref){
+  var g=R.right[sheet]; if(!g) return null;
+  var m=/^([A-Z]+)([0-9]+)$/.exec(ref); if(!m) return null;
+  var col=0,letters=m[1];
+  for(var i=0;i<letters.length;i++) col=col*26+(letters.charCodeAt(i)-64);
+  var row=parseInt(m[2],10);
+  var cells=[],lo=Math.max(1,col-4),hi=Math.min(g.maxCol,col+4);
+  for(var c=lo;c<=hi;c++){
+    var cell=xldiff.get(g,row,c);
+    if(cell.f===null&&cell.v===null) continue;
+    cells.push({col:c,ref:xldiff.colLetter(c)+row,r1c1:cell.r1c1,
+      text:xldiff.fmt(cell.f),isTarget:c===col});
+  }
+  if(cells.length<3) return null;
+  var others=cells.filter(function(x){return !x.isTarget&&typeof x.r1c1==="string"&&x.r1c1.charAt(0)==="=";});
+  if(others.length<2) return null;
+  var modal=others[0].r1c1, agree=0;
+  others.forEach(function(x){if(x.r1c1===modal)agree++;});
+  if(agree<others.length) return null;
+  cells.forEach(function(x){x.match=x.r1c1===modal;});
+  return {cells:cells,range:cells[0].ref+":"+cells[cells.length-1].ref,
+    agree:agree,total:cells.length};
+}
+
+/* ── verdict (1a) ────────────────────────────────────────────────────── */
+function visible(){ return R.findings.filter(function(f,i){return !suppressed[i];}); }
+
+function worstConfidence(){
+  var lo=1;
+  for(var n in R.align) if(R.align[n].ratio<lo) lo=R.align[n].ratio;
+  return lo;
+}
+function verdict(){
+  var f=visible(), c={high:0,medium:0,low:0};
+  f.forEach(function(x){c[x.severity]++;});
+  var conf=worstConfidence(), cells=f.filter(function(x){return x.ref&&x.ref.indexOf("row ")!==0;}).length;
+  var head;
+  /* 1a's own annotation: when alignment confidence drops, the headline has to
+     soften itself rather than assert a verdict it cannot stand behind. */
+  if(conf<0.35){
+    head="These may not be two versions of one model. Read the findings, not the verdict.";
+  }else if(R.stale){
+    head=c.high?(word(c.high)+" change"+(c.high===1?"":"s")+" need"+(c.high===1?"s":"")+" a human. Value impact is unverified."):
+      "No high-severity changes — but value impact is unverified.";
+  }else if(c.high){
+    head=word(c.high)+" change"+(c.high===1?"":"s")+" need"+(c.high===1?"s":"")+
+      " a human. Everything else is safe to skim.";
+  }else if(c.medium){
+    head="Nothing here needs a human. "+c.medium+" change"+(c.medium===1?"":"s")+" worth a look.";
+  }else if(f.length){
+    head="Nothing of substance changed.";
+  }else{
+    head="These two files are identical.";
+  }
+  $("headline").textContent=head;
+  var nsheets=Object.keys(R.right).length;
+  var bits=[nsheets+" sheet"+(nsheets===1?"":"s"), cells+" cells changed",
+    c.high+" high", c.medium+" medium", c.low+" low",
+    "alignment confidence "+conf.toFixed(2)];
+  var nsup=Object.keys(suppressed).length;
+  if(nsup) bits.push(nsup+" suppressed");
+  $("counts").textContent=bits.join(" · ");
+}
+function word(n){
+  return ["No","One","Two","Three","Four","Five","Six","Seven","Eight","Nine"][n]||String(n);
+}
+
+/* ── warning states (1m) ─────────────────────────────────────────────── */
+function warnband(){
+  var conf=worstConfidence(), h="";
+  if(conf<0.35){
+    h+='<div class="warn"><span class="sv">STOPPED</span>'+
+       "<span>These do not look like two versions of one model.</span></div>"+
+       '<div style="padding:12px 14px;border-bottom:1px solid var(--color-divider);font-size:12px;line-height:1.55">'+
+       "Row alignment confidence is "+conf.toFixed(2)+", below the 0.35 threshold. Findings below are "+
+       "reported anyway, but treat them as a positional diff: every cell reported, no reliable structure.</div>";
+  }
+  if(R.stale){
+    h+='<div class="warn"><span class="sv">UNVERIFIED</span>'+
+       "<span>Value impact may be wrong. Excel never recalculated one of these files.</span></div>"+
+       '<div style="padding:12px 14px;border-bottom:1px solid var(--color-divider);font-size:12px;line-height:1.55">'+
+       "Some formulas carry no cached result, so the values shown are what Excel last stored — not what "+
+       "these formulas produce. <b>Structural findings are unaffected.</b> Open the file in Excel, "+
+       "recalculate, save, and re-run.</div>";
+  }
+  $("warnband").innerHTML=h;
+}
+
+/* ── panes ───────────────────────────────────────────────────────────── */
 function buildHunks(name,left,right,sevByRef){
   var info=R.align[name];
   if(!info) return [];
@@ -202,7 +593,7 @@ function buildHunks(name,left,right,sevByRef){
     if(flag) for(var j=Math.max(0,i-CONTEXT);j<Math.min(rows.length,i+CONTEXT+1);j++) hot[j]=1;
   });
 
-  var ncol=Math.min(Math.max(left.maxCol,right.maxCol),MAX_COLS);
+  var ncol=Math.min(Math.max(left.maxCol,right.maxCol),MAX_COLS)||1;
   var out=[],prev=null;
   Object.keys(hot).map(Number).sort(function(a,b){return a-b;}).forEach(function(i){
     var lr=rows[i][0], rr=rows[i][1];
@@ -211,9 +602,13 @@ function buildHunks(name,left,right,sevByRef){
     var cells=[];
     for(var c=1;c<=ncol;c++){
       var lc=lr?xldiff.get(left,lr,c):null, rc=rr?xldiff.get(right,rr,c):null;
+      var lv=lc?lc.v:null, rv=rc?rc.v:null;
       cells.push({c:xldiff.colLetter(c),
         lf:lc?xldiff.fmt(lc.f):"", lv:lc?xldiff.fmt(lc.v):"",
         rf:rc?xldiff.fmt(rc.f):"", rv:rc?xldiff.fmt(rc.v):"",
+        d:(typeof lv==="number"&&typeof rv==="number")?rv-lv:null,
+        num:lc&&typeof lc.v==="number"||rc&&typeof rc.v==="number",
+        ref:rr?xldiff.colLetter(c)+rr:"",
         sev:rr?(sev[xldiff.colLetter(c)+rr]||""):""});
     }
     out.push({l:lr,r:rr,cells:cells,state:lr===null?"added":(rr===null?"deleted":"")});
@@ -221,106 +616,359 @@ function buildHunks(name,left,right,sevByRef){
   return out;
 }
 
+function cellText(cell,side){
+  if(layer==="values") return side==="l"?cell.lv:cell.rv;
+  if(layer==="formulas") return side==="l"?cell.lf:cell.rf;
+  if(cell.d===null) return "";
+  if(cell.d===0) return "+0";
+  return (cell.d>0?"+":"−")+xldiff.fmt(Math.abs(cell.d));
+}
+
+function grid(){
+  var s=sheets[active];
+  $("hl_").textContent=(files.A?files.A.name+" · ":"")+s.name;
+  $("hr_").textContent=(files.B?files.B.name+" · ":"")+s.name;
+
+  if(!s.hunks.length){
+    var msg='<div class="dim" style="padding:14px;font-size:11.5px">'+
+      (s.state==="added"?"This sheet is new in the revised file — there is nothing to compare it against."
+       :s.state==="deleted"?"This sheet was deleted. It has no counterpart in the revised file."
+       :"No aligned changes on this sheet.")+"</div>";
+    $("paneL").innerHTML=msg; $("paneR").innerHTML=msg; return;
+  }
+
+  /* Impact layer scales its bars against the largest delta on screen. */
+  var peak=0;
+  if(layer==="impact") s.hunks.forEach(function(h){ if(!h.gap) h.cells.forEach(function(c){
+    if(c.d!==null&&Math.abs(c.d)>peak) peak=Math.abs(c.d); });});
+
+  var ncol=s.hunks.length?s.hunks[0].cells.length:1;
+  var tmpl="30px "+(ncol>1?"122px repeat("+(ncol-1)+",92px)":"122px");
+
+  function render(side){
+    var h='<div class="gr" style="grid-template-columns:'+tmpl+'">';
+    h+='<span class="gh"></span>';
+    for(var c=0;c<ncol;c++) h+='<span class="gh">'+xldiff.colLetter(c+1)+"</span>";
+    s.hunks.forEach(function(hu,i){
+      if(hu.gap){h+='<span class="elide">···</span>';return;}
+      var rn=side==="l"?hu.l:hu.r;
+      var absent=(side==="l"&&hu.state==="added")||(side==="r"&&hu.state==="deleted");
+      h+='<span class="gh'+(absent?" gap":"")+'">'+(rn||"")+"</span>";
+      hu.cells.forEach(function(cell){
+        if(absent){h+='<span class="gap"></span>';return;}
+        var cls=[];
+        if(cell.num||layer==="impact") cls.push("nu");
+        if(sel&&sel.sheet===s.name&&sel.ref&&cell.ref===sel.ref) cls.push("sel");
+        else if(cell.sev) cls.push("chg");
+        if(cell.ref) cls.push("cellbtn");
+        var txt=esc(cellText(cell,side));
+        if(layer==="impact"&&side==="r"&&cell.d&&peak){
+          var w=Math.max(2,Math.round(Math.abs(cell.d)/peak*34));
+          txt+='<span class="bar" style="width:'+w+'px"></span>';
+        }
+        h+="<span"+(cls.length?' class="'+cls.join(" ")+'"':"")+
+          (cell.ref?' data-ref="'+esc(cell.ref)+'" title="'+esc(cell.ref)+'"':"")+">"+txt+"</span>";
+      });
+    });
+    return h+"</div>";
+  }
+  $("paneL").innerHTML=render("l");
+  $("paneR").innerHTML=render("r");
+
+  [$("paneL"),$("paneR")].forEach(function(p){
+    p.querySelectorAll("[data-ref]").forEach(function(n){
+      n.onclick=function(){ selectRef(s.name,n.getAttribute("data-ref")); };
+    });
+  });
+}
+
+/* ── ribbon ──────────────────────────────────────────────────────────── */
+function ribbon(){
+  var e=$("ribbon"); e.innerHTML="";
+  sheets.forEach(function(s,i){
+    var b=el("button",(i===active?"on ":"")+(s.state==="deleted"?"gone":""));
+    b.appendChild(document.createTextNode(s.name));
+    if(s.high) b.appendChild(el("b",null,s.high+"H"));
+    else if(s.med) b.appendChild(el("b",null,s.med+"M"));
+    else if(s.n) b.appendChild(el("b",null,s.n+"L"));
+    if(s.state==="added") b.appendChild(el("b",null,"+ new"));
+    if(s.state==="deleted") b.appendChild(el("b",null,"− deleted"));
+    b.onclick=function(){active=i;ribbon();grid();};
+    e.appendChild(b);
+  });
+}
+
+/* ── findings list ───────────────────────────────────────────────────── */
+function list(){
+  var e=$("findings"); e.innerHTML="";
+  var shown=0;
+  R.findings.forEach(function(f,i){
+    var off=!!suppressed[i];
+    if(!off) shown++;
+    else if(!showSup) return;
+    var b=el("button","fi"+(off?" off":"")+
+      (sel&&sel.i===i?" on":""));
+    var t=el("div","fi-t");
+    t.appendChild(el("span","sv sv-"+f.severity,f.severity.toUpperCase()));
+    t.appendChild(el("span","fi-r",esc(f.ref||f.sheet||"—")));
+    t.appendChild(el("span","mi",kindLabel(f.kind)));
+    t.lastChild.style.marginLeft="auto";
+    b.appendChild(t);
+    if(f.sheet&&f.ref) b.appendChild(el("div","mi",esc(f.sheet)));
+    b.appendChild(el("div","fi-d",esc(f.summary)));
+    if(f.detail) b.appendChild(el("div","fi-d dim",esc(f.detail)));
+    var d=diffStacked(f.before,f.after);
+    if(d){var w=el("div");w.style.cssText="display:flex;flex-direction:column;gap:4px";
+      w.innerHTML=d;b.appendChild(w);}
+    b.onclick=function(){select(i);};
+    e.appendChild(b);
+  });
+  $("fcount").textContent=shown+" finding"+(shown===1?"":"s");
+  var nsup=Object.keys(suppressed).length;
+  $("supbtn").hidden=!nsup;
+  $("supbtn").textContent=(showSup?"Hide":"Show")+" suppressed · "+nsup;
+}
+/* Suppressed findings stay in the list, dimmed, until you ask for them to
+   go — hiding is a choice, not the default, so nothing disappears silently. */
+$("supbtn").onclick=function(){ showSup=!showSup; list(); };
+function kindLabel(k){
+  return {run_break:"Run break",hardcode:"Hardcode",formula_changed:"Formula",
+    constant_changed:"Input",constant_to_formula:"Now calculated",cell_added:"Added",
+    cell_deleted:"Cleared",impact:"Downstream",row_added:"Row inserted",
+    row_deleted:"Row deleted",sheet_added:"Sheet added",sheet_deleted:"Sheet deleted",
+    run_repaired:"Run repaired",alignment:"Alignment",impact_capped:"Capped"}[k]||k;
+}
+
+/* ── selection + the strip under the panes ───────────────────────────── */
+function select(i){
+  var f=R.findings[i];
+  sel={i:i,sheet:f.sheet,ref:f.ref&&f.ref.indexOf("row ")!==0?f.ref:null,f:f};
+  var idx=-1; sheets.forEach(function(s,k){if(s.name===f.sheet)idx=k;});
+  if(idx>=0&&idx!==active){active=idx;ribbon();}
+  grid();list();strip();
+  scrollToSel();
+}
+function selectRef(sheet,ref){
+  var found=-1;
+  R.findings.forEach(function(f,i){ if(found<0&&f.sheet===sheet&&f.ref===ref) found=i; });
+  if(found>=0){select(found);return;}
+  sel={i:-1,sheet:sheet,ref:ref,f:null};
+  grid();list();strip();
+}
+function scrollToSel(){
+  if(!sel||!sel.ref) return;
+  [$("paneL"),$("paneR")].forEach(function(p){
+    var n=p.querySelector(".sel");
+    if(n) n.scrollIntoView({block:"center",inline:"nearest"});
+  });
+}
+function strip(){
+  var e=$("strip");
+  if(!sel){e.innerHTML='<span class="mi">Select a finding or a cell</span>';return;}
+  var f=sel.f, ra=sel.ref?runAnalysis(sel.sheet,sel.ref):null;
+  var label=sel.sheet+(sel.ref?"!"+sel.ref:"");
+  var h="";
+
+  h+='<div style="flex:1;min-width:260px">'+
+     '<div class="mi" style="margin-bottom:7px">Selected · '+esc(label)+"</div>";
+  if(f&&(f.before||f.after)){
+    h+=diffColumns(f.before,f.after);
+    h+='<details style="margin-top:7px"'+(tokenView?" open":"")+
+       "><summary>Token view</summary>"+diffTokenTable(f.before,f.after)+"</details>";
+  }else{
+    h+='<div class="fx" style="border-style:dashed">'+esc(cellForRef())+"</div>";
+  }
+  h+="</div>";
+
+  h+='<div style="width:250px;flex:none"><div class="mi" style="margin-bottom:7px">Why it is flagged</div>'+
+     '<div style="font-size:11px;line-height:1.5">';
+  if(f){
+    h+=esc(f.summary)+(f.detail?" "+esc(f.detail):"");
+    if(ra) h+=" Row run "+esc(ra.range)+" — "+ra.agree+" of "+(ra.total-1)+
+      " neighbours identical.";
+  }else{
+    h+='<span class="dim">No finding on this cell. It is shown for context.</span>';
+  }
+  h+="</div></div>";
+
+  if(f){
+    h+='<div style="width:186px;flex:none"><div class="mi" style="margin-bottom:7px">Value</div>'+
+       '<div class="mo" style="font-size:10.5px;line-height:1.7">';
+    if(f.valBefore||f.valAfter){
+      h+=esc(f.valBefore||"empty")+" → "+esc(f.valAfter||"empty");
+      if(R.stale) h+='<br><span class="dim">unverified — stale cache</span>';
+    }else h+='<span class="dim">no cached value</span>';
+    h+="</div></div>";
+
+    h+='<div style="display:flex;flex-direction:column;gap:6px;flex:none">'+
+       '<button class="tbtn" id="supone">'+(suppressed[sel.i]?"Restore":"Suppress")+"</button>"+
+       '<button class="tbtn" id="copyref">Copy ref</button></div>';
+  }
+  e.innerHTML=h;
+
+  var d=e.querySelector("details");
+  if(d) d.ontoggle=function(){tokenView=d.open;};
+  var sup=$("supone");
+  if(sup) sup.onclick=function(){
+    if(suppressed[sel.i]) delete suppressed[sel.i]; else suppressed[sel.i]=1;
+    verdict();list();strip();
+  };
+  var cp=$("copyref");
+  if(cp) cp.onclick=function(){
+    var text=label;
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){cp.textContent="Copied";
+        setTimeout(function(){cp.textContent="Copy ref";},1200);});
+    }
+  };
+}
+function cellForRef(){
+  if(!sel.ref) return "";
+  var g=R.right[sel.sheet]; if(!g) return "";
+  var m=/^([A-Z]+)([0-9]+)$/.exec(sel.ref); if(!m) return "";
+  var col=0; for(var i=0;i<m[1].length;i++) col=col*26+(m[1].charCodeAt(i)-64);
+  var c=xldiff.get(g,parseInt(m[2],10),col);
+  return xldiff.fmt(c.f)||xldiff.fmt(c.v)||"empty";
+}
+
+/* ── assemble ────────────────────────────────────────────────────────── */
 function show(){
   var f=R.findings, sevByRef={};
   f.forEach(function(x){ if(x.ref&&x.kind!=="impact_capped"){
     (sevByRef[x.sheet]=sevByRef[x.sheet]||{})[x.ref]=x.severity;}});
 
+  function tally(n){
+    var o={n:0,high:0,med:0};
+    f.forEach(function(x){ if(x.sheet===n){o.n++;
+      if(x.severity==="high")o.high++; else if(x.severity==="medium")o.med++;}});
+    return o;
+  }
   sheets=[];
   Object.keys(R.right).forEach(function(n){
+    var t=tally(n);
     sheets.push({name:n,state:R.left[n]?"":"added",
       hunks:R.left[n]?buildHunks(n,R.left[n],R.right[n],sevByRef):[],
-      n:f.filter(function(x){return x.sheet===n;}).length});
+      n:t.n,high:t.high,med:t.med});
   });
   Object.keys(R.left).forEach(function(n){
-    if(!R.right[n]) sheets.push({name:n,state:"deleted",hunks:[],
-      n:f.filter(function(x){return x.sheet===n;}).length});
+    if(!R.right[n]){var t=tally(n);
+      sheets.push({name:n,state:"deleted",hunks:[],n:t.n,high:t.high,med:t.med});}
   });
 
+  $("chipA").textContent=files.A.name;
+  $("chipB").textContent=files.B.name;
+  active=0; sel=null; suppressed={}; showSup=true;
+
+  /* Open on the first high finding, as 1b specifies. */
+  var first=-1;
+  f.forEach(function(x,i){ if(first<0&&x.severity==="high"&&x.ref) first=i; });
+
+  $("setup").hidden=true; $("review").hidden=false;
+  warnband(); verdict(); ribbon(); grid(); list(); strip();
+  if(first>=0) select(first);
+  $("go").disabled=false; $("go").textContent="Compare";
+}
+
+/* ── layer toggle (1h) ───────────────────────────────────────────────── */
+$("layers").querySelectorAll("button").forEach(function(b){
+  b.onclick=function(){
+    layer=b.getAttribute("data-layer");
+    $("layers").querySelectorAll("button").forEach(function(x){x.classList.remove("on");});
+    b.classList.add("on");
+    $("cursor").textContent=layer==="impact"
+      ? "value delta per cell · from cached results, not a recalc" : "";
+    grid();
+  };
+});
+
+/* ── synced scrolling ────────────────────────────────────────────────── */
+var lock=false;
+function sync(a,b){a.addEventListener("scroll",function(){
+  if(lock)return;lock=true;b.scrollTop=a.scrollTop;b.scrollLeft=a.scrollLeft;
+  requestAnimationFrame(function(){lock=false;});});}
+sync($("paneL"),$("paneR")); sync($("paneR"),$("paneL"));
+
+/* ── export (1l) → the read-only report (1n) ─────────────────────────── */
+$("exportbtn").onclick=function(){
+  $("exportmeta").textContent=visible().length+" findings · "+
+    files.A.name+" → "+files.B.name;
+  $("exportdlg").hidden=false;
+};
+$("xcancel").onclick=function(){$("exportdlg").hidden=true;};
+$("exportdlg").onclick=function(e){if(e.target===$("exportdlg"))$("exportdlg").hidden=true;};
+
+function chosen(){
+  var r=document.querySelector('input[name="xf"]:checked');
+  return r?r.value:"html";
+}
+function payload(){
+  var keep=$("xsup").checked;
+  return R.findings.filter(function(f,i){return keep||!suppressed[i];});
+}
+function download(name,mime,text){
+  var blob=new Blob([text],{type:mime});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement("a");
+  a.href=url; a.download=name; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000);
+}
+$("xgo").onclick=function(){
+  var f=payload();
+  if(chosen()==="json"){
+    download("xldiff-findings.json","application/json",JSON.stringify({
+      baseline:files.A.name, revised:files.B.name,
+      generated:new Date().toISOString(), stale:R.stale,
+      alignmentConfidence:worstConfidence(), findings:f
+    },null,2));
+  }else{
+    download("xldiff-report.html","text/html",report(f));
+  }
+  $("exportdlg").hidden=true;
+};
+
+/* 1n — the same viewer as a static file: no scripting needed to read it. */
+function report(f){
   var c={high:0,medium:0,low:0};
   f.forEach(function(x){c[x.severity]++;});
-  $("summary").textContent=files.A.name+"  vs  "+files.B.name+"   ·   "+
-    f.length+" findings: "+c.high+" high, "+c.medium+" medium, "+c.low+" low";
-  $("warn").innerHTML=R.stale?'<div class="warn">One of these files has no cached calculation values. Value impact is incomplete. Open it in Excel, recalculate, and save.</div>':"";
-
-  active=0;
-  $("setup").classList.add("hide");$("results").classList.remove("hide");
-  tabs();grid();list();
+  var conf=worstConfidence();
+  var css=document.querySelector("style").textContent;
+  var rows=f.map(function(x){
+    var d=(x.before||x.after)?diffStacked(x.before,x.after):"";
+    return '<div style="padding:12px 14px;border-bottom:1px solid var(--color-divider);'+
+      'display:flex;flex-direction:column;gap:7px">'+
+      '<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">'+
+      '<span class="sv sv-'+x.severity+'">'+x.severity.toUpperCase()+"</span>"+
+      '<span class="fi-r">'+esc(x.sheet+(x.ref?"!"+x.ref:""))+"</span>"+
+      '<span style="font-size:11.5px">'+esc(x.summary)+"</span></div>"+
+      (x.detail?'<div class="fi-d dim">'+esc(x.detail)+"</div>":"")+
+      (d?'<div style="display:flex;flex-direction:column;gap:4px">'+d+"</div>":"")+
+      ((x.valBefore||x.valAfter)?'<div class="mo dim" style="font-size:10px">value '+
+        esc(x.valBefore||"empty")+" → "+esc(x.valAfter||"empty")+"</div>":"")+
+      "</div>";
+  }).join("");
+  var head=c.high?word(c.high)+" change"+(c.high===1?"":"s")+" need"+(c.high===1?"s":"")+" a human."
+    :"No high-severity changes.";
+  return "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"+
+    '<meta name="viewport" content="width=device-width,initial-scale=1">'+
+    "<title>xldiff — "+esc(files.A.name)+" → "+esc(files.B.name)+"</title>"+
+    "<style>"+css+"</style></head><body><div class=\"page\">"+
+    '<div class="wf bpx" style="max-width:760px;margin:0 auto">'+
+    '<div style="padding:11px 14px;border-bottom:1px solid var(--color-divider);'+
+      'display:flex;align-items:center;gap:11px;flex-wrap:wrap">'+
+      '<span class="brand" style="font-size:13px">XLDIFF</span>'+
+      '<span class="mo dim" style="font-size:10px;line-height:1.5">'+
+      esc(files.A.name)+" → "+esc(files.B.name)+"<br>"+
+      esc(new Date().toString())+" · generated locally · read-only</span></div>"+
+    (R.stale?'<div class="warn"><span class="sv">UNVERIFIED</span><span>Excel never recalculated one of these files — value impact may be wrong. Structural findings are unaffected.</span></div>':"")+
+    (conf<0.35?'<div class="warn"><span class="sv">LOW CONFIDENCE</span><span>Row alignment confidence '+conf.toFixed(2)+' — these may not be two versions of one model.</span></div>':"")+
+    '<div style="padding:13px 14px;border-bottom:1px solid var(--color-divider)">'+
+      '<div class="hd" style="font-size:19px">'+esc(head)+"</div>"+
+      '<div class="mo dim" style="font-size:10px;margin-top:3px">'+
+      c.high+" high · "+c.medium+" medium · "+c.low+" low · alignment confidence "+conf.toFixed(2)+
+      "<br>One file. No assets, no network, no JavaScript required to read it.</div></div>"+
+    rows+"</div></div></body></html>";
 }
 
-function tabs(){
-  var h="";
-  sheets.forEach(function(s,i){
-    h+='<span class="tab '+(i===active?"on ":"")+s.state+'" data-i="'+i+'">'+esc(s.name)+
-       '<span class="n">'+s.n+"</span></span>";});
-  var e=$("tabs");e.innerHTML=h;
-  Array.prototype.forEach.call(e.querySelectorAll(".tab"),function(t){
-    t.onclick=function(){active=+t.dataset.i;tabs();grid();};});
-}
-
-function grid(){
-  var s=sheets[active];
-  $("hl").textContent=files.A.name+" · "+s.name;
-  $("hr").textContent=files.B.name+" · "+s.name;
-  var L="",Rr="";
-  if(!s.hunks.length){
-    L=Rr='<tr><td style="color:#a8a49b;padding:10px">no aligned changes on this sheet</td></tr>';}
-  s.hunks.forEach(function(h,i){
-    if(h.gap){L+='<tr class="gap"><td colspan="20">···</td></tr>';
-              Rr+='<tr class="gap"><td colspan="20">···</td></tr>';return;}
-    var cls=h.state?' class="'+h.state+'"':"";
-    L+="<tr"+cls+' data-h="'+i+'"><td class="rn">'+(h.l||"")+"</td>";
-    Rr+="<tr"+cls+' data-h="'+i+'"><td class="rn">'+(h.r||"")+"</td>";
-    h.cells.forEach(function(c){
-      L+='<td class="'+(c.sev||"")+'">'+esc(layer==="formulas"?c.lf:c.lv)+"</td>";
-      Rr+='<td class="'+(c.sev||"")+'">'+esc(layer==="formulas"?c.rf:c.rv)+"</td>";});
-    L+="</tr>";Rr+="</tr>";});
-  $("tl").innerHTML=L;$("tr_").innerHTML=Rr;
-}
-
-function list(){
-  var h="";
-  R.findings.forEach(function(f,i){
-    var code=(f.before||f.after)?esc(f.before)+"   \u2192   "+esc(f.after):"";
-    var val=(f.valBefore!==f.valAfter&&(f.valBefore||f.valAfter))
-      ?'<span class="ref">value '+esc(f.valBefore)+" \u2192 "+esc(f.valAfter)+"</span>":"";
-    h+='<div class="f" data-i="'+i+'"><span class="dot" style="background:'+SEVC[f.severity]+'"></span><div>'+
-       "<div>"+esc(f.summary)+(f.ref?' <span class="ref">'+esc(f.sheet)+"!"+esc(f.ref)+"</span>"
-       :(f.sheet?' <span class="ref">'+esc(f.sheet)+"</span>":""))+"</div>"+
-       (f.detail?'<div class="d">'+esc(f.detail)+"</div>":"")+
-       (code?'<div class="code">'+code+"</div>":"")+
-       (val?'<div class="d">'+val+"</div>":"")+"</div></div>";});
-  var e=$("findings");e.innerHTML=h;
-  Array.prototype.forEach.call(e.querySelectorAll(".f"),function(el){
-    el.onclick=function(){jump(R.findings[+el.dataset.i]);};});
-}
-
-function jump(f){
-  var idx=-1;sheets.forEach(function(s,i){if(s.name===f.sheet)idx=i;});
-  if(idx<0)return;
-  if(idx!==active){active=idx;tabs();grid();}
-  if(!f.ref)return;
-  var row=parseInt(f.ref.replace(/[^0-9]/g,""),10);
-  var s=sheets[active],hi=-1;
-  s.hunks.forEach(function(h,i){if(!h.gap&&h.r===row)hi=i;});
-  if(hi<0)return;
-  ["tl","tr_"].forEach(function(id){
-    var t=$(id);
-    Array.prototype.forEach.call(t.querySelectorAll("tr"),function(r){r.classList.remove("focus");});
-    var tgt=t.querySelector('tr[data-h="'+hi+'"]');
-    if(tgt){tgt.classList.add("focus");tgt.scrollIntoView({block:"center"});}});
-}
-
-Array.prototype.forEach.call(document.querySelectorAll(".seg span"),function(b){
-  b.onclick=function(){layer=b.dataset.layer;
-    Array.prototype.forEach.call(document.querySelectorAll(".seg span"),function(x){x.classList.remove("on");});
-    b.classList.add("on");grid();};});
-
-var pl=$("paneL"),pr=$("paneR"),lock=false;
-function sync(a,b){a.addEventListener("scroll",function(){if(lock)return;lock=true;
-  b.scrollTop=a.scrollTop;b.scrollLeft=a.scrollLeft;lock=false;});}
-sync(pl,pr);sync(pr,pl);
-
-wire("A");wire("B");
+wire("A"); wire("B");
 })();
 </script></body></html>
