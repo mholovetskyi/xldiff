@@ -28,8 +28,25 @@ def col_to_num(letters):
     return n
 
 
-def to_r1c1(formula, row, col):
-    """Normalise an A1 formula to R1C1 so a copied formula compares equal."""
+_EXTLINK = re.compile(r'\[[^\[\]]+\]')
+
+
+def external_links(formula):
+    """Workbook references embedded in a formula, as [book.xlsx] tokens."""
+    if not isinstance(formula, str):
+        return []
+    return sorted(set(_EXTLINK.findall(formula)))
+
+
+def to_r1c1(formula, row, col, names=()):
+    """Normalise an A1 formula to R1C1 so a copied formula compares equal.
+
+    Defined names are left alone. A name like TAX1 is shaped exactly like a
+    cell reference, and rewriting it relative to its own position makes the
+    same formula look different once it moves down a row -- a false change
+    reported on every formula that uses a name, in any file where a row was
+    inserted above it.
+    """
     if not isinstance(formula, str) or not formula.startswith("="):
         return formula
     placeholders = []
@@ -42,6 +59,8 @@ def to_r1c1(formula, row, col):
 
     def repl(m):
         cabs, letters, rabs, digits = m.groups()
+        if (letters + digits).upper() in names:
+            return m.group(0)
         c = col_to_num(letters)
         r = int(digits)
         rpart = "R%d" % r if rabs else ("R[%d]" % (r - row) if r != row else "R")
@@ -123,12 +142,29 @@ class SheetGrid:
                 if (row, c) in self.cells]
 
 
+def read_names(wb):
+    """Workbook-level defined names, as name -> the reference it points at.
+
+    Sheet-local names are out of scope: they cannot be referenced from
+    elsewhere, so a change to one is already visible as a formula change.
+    """
+    out = {}
+    for name, dn in getattr(wb, "defined_names", {}).items():
+        try:
+            out[str(name)] = str(dn.value)
+        except (AttributeError, TypeError):
+            continue
+    return out
+
+
 def read_workbook(path):
     """Two passes: formulas, then cached values."""
     wbf = load_workbook(path, data_only=False, read_only=True)
     wbv = load_workbook(path, data_only=True, read_only=True)
     grids = {}
     stale = False
+    names = read_names(wbf)
+    upper = set(n.upper() for n in names)
     for name in wbf.sheetnames:
         sf, sv = wbf[name], wbv[name]
         g = SheetGrid(name)
@@ -150,7 +186,7 @@ def read_workbook(path):
                     continue
                 cell = Cell(formula=c.value, value=v)
                 if cell.is_formula:
-                    cell.r1c1 = to_r1c1(c.value, c.row, c.column)
+                    cell.r1c1 = to_r1c1(c.value, c.row, c.column, upper)
                     if v is None:
                         stale = True
                 else:
@@ -159,7 +195,7 @@ def read_workbook(path):
         grids[name] = g
     wbf.close()
     wbv.close()
-    return grids, stale
+    return grids, stale, names
 
 
 def _collapse(shape):
@@ -453,6 +489,20 @@ def diff_sheet(name, left, right, findings, align_out=None):
                 findings.append(err)
                 continue
 
+            # A formula that now reads from a different workbook is a change of
+            # source, not of logic, and the diff of the text buries it.
+            lx, rx = external_links(lc.formula), external_links(rc.formula)
+            if lx != rx and (lx or rx):
+                findings.append(Finding(
+                    "high", "external_link_changed", name, ref,
+                    "Formula reads from a different workbook",
+                    "Was %s, now %s." % (", ".join(lx) or "no external link",
+                                         ", ".join(rx) or "no external link"),
+                    before=fmt(lc.formula), after=fmt(rc.formula),
+                    val_before=vb, val_after=va, magnitude=mag,
+                    row_left=lr, row_right=rr))
+                continue
+
             if same_logic:
                 if lc.value != rc.value and not lc.empty:
                     findings.append(Finding(
@@ -550,11 +600,38 @@ def fmt(v):
     return str(v)
 
 
+def diff_names(names_a, names_b, findings):
+    """Defined names, which break formulas silently when they move.
+
+    A deleted name leaves every formula that used it unresolvable, and a
+    repointed name changes what those formulas mean without changing a single
+    character of their text -- the one edit a formula diff cannot see.
+    """
+    for n in sorted(set(names_b) - set(names_a)):
+        findings.append(Finding(
+            "low", "name_added", "", n, "Named range added: %s" % n,
+            after=names_b[n]))
+    for n in sorted(set(names_a) - set(names_b)):
+        findings.append(Finding(
+            "high", "name_deleted", "", n, "Named range deleted: %s" % n,
+            "Any formula that referred to it can no longer resolve.",
+            before=names_a[n]))
+    for n in sorted(set(names_a) & set(names_b)):
+        if names_a[n] != names_b[n]:
+            findings.append(Finding(
+                "high", "name_changed", "", n,
+                "Named range %s now points somewhere else" % n,
+                "Formulas using it changed meaning without changing text.",
+                before=names_a[n], after=names_b[n]))
+
+
 def compare(path_a, path_b):
-    left, stale_a = read_workbook(path_a)
-    right, stale_b = read_workbook(path_b)
+    left, stale_a, names_a = read_workbook(path_a)
+    right, stale_b, names_b = read_workbook(path_b)
     findings = []
     align = {}
+
+    diff_names(names_a, names_b, findings)
 
     for name in right:
         if name not in left:
@@ -584,4 +661,5 @@ def compare(path_a, path_b):
         "left": left, "right": right, "findings": findings, "align": align,
         "stale": stale_a or stale_b,
         "files": (path_a, path_b),
+        "names": (names_a, names_b),
     }

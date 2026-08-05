@@ -366,11 +366,27 @@ function colLetter(n) {
   return s;
 }
 
-function toR1C1(formula, row, col) {
+var EXTLINK = /\[[^\[\]]+\]/g;
+
+/* Workbook references embedded in a formula, as [book.xlsx] tokens. */
+function externalLinks(f) {
+  if (typeof f !== "string") return [];
+  var m = f.match(EXTLINK);
+  if (!m) return [];
+  return m.filter(function (x, i) { return m.indexOf(x) === i; }).sort();
+}
+
+/* Normalise an A1 formula to R1C1 so a copied formula compares equal.
+   Defined names are left alone: a name like TAX1 is shaped exactly like a cell
+   reference, and rewriting it relative to its own position makes the same
+   formula look different once it moves down a row — a false change on every
+   formula that uses a name, in any file where a row was inserted above it. */
+function toR1C1(formula, row, col, names) {
   if (typeof formula !== "string" || formula.charAt(0) !== "=") return formula;
   var stash = [];
   var body = formula.replace(QUOTED, function (m) { stash.push(m); return "\u0000" + (stash.length - 1) + "\u0000"; });
   body = body.replace(REF, function (all, pre, cabs, letters, rabs, digits) {
+    if (names && names[(letters + digits).toUpperCase()]) return all;
     var c = colToNum(letters), r = parseInt(digits, 10);
     var rp = rabs ? "R" + r : (r !== row ? "R[" + (r - row) + "]" : "R");
     var cp = cabs ? "C" + c : (c !== col ? "C[" + (c - col) + "]" : "C");
@@ -407,7 +423,22 @@ function isFormula(cell) { return cell && typeof cell.f === "string" && cell.f.c
 function isEmpty(cell) { return !cell || (cell.f === null && cell.v === null); }
 var EMPTY = { f: null, v: null, r1c1: null };
 
-function readSheet(ws, name) {
+/* Workbook-level defined names, as NAME -> the reference it points at. Sheet
+   local names are out of scope: they cannot be referenced from elsewhere, so a
+   change to one is already visible as a formula change. */
+function readNames(wb) {
+  var out = {};
+  var list = wb && wb.Workbook && wb.Workbook.Names;
+  if (!list) return out;
+  for (var i = 0; i < list.length; i++) {
+    var n = list[i];
+    if (!n || !n.Name || n.Sheet !== undefined && n.Sheet !== null) continue;
+    out[n.Name] = String(n.Ref === undefined ? "" : n.Ref);
+  }
+  return out;
+}
+
+function readSheet(ws, name, names) {
   var grid = { name: name, cells: {}, maxRow: 0, maxCol: 0 };
   if (!ws || !ws["!ref"]) return grid;
   for (var key in ws) {
@@ -424,7 +455,7 @@ function readSheet(ws, name) {
     if (src.t === "e") val = typeof src.w === "string" ? src.w : (ERR_CODE[src.v] || "#N/A");
     var formula = src.f !== undefined ? "=" + src.f : val;
     var cell = { f: formula, v: val, r1c1: null };
-    cell.r1c1 = isFormula(cell) ? toR1C1(formula, r, c) : formula;
+    cell.r1c1 = isFormula(cell) ? toR1C1(formula, r, c, names) : formula;
     grid.cells[r + ":" + c] = cell;
     if (r > grid.maxRow) grid.maxRow = r;
     if (c > grid.maxCol) grid.maxCol = c;
@@ -705,6 +736,19 @@ function diffSheet(name, left, right, findings, align) {
       var err = errorFinding(name, ref, lc, rc, base);
       if (err) { findings.push(err); return; }
 
+      /* A formula that now reads from a different workbook is a change of
+         source, not of logic, and the diff of the text buries it. */
+      var lx = externalLinks(lc.f).join(", "), rx = externalLinks(rc.f).join(", ");
+      if (lx !== rx && (lx || rx)) {
+        findings.push(F("high", "external_link_changed", name, ref,
+          "Formula reads from a different workbook",
+          Object.assign({
+            detail: "Was " + (lx || "no external link") + ", now " + (rx || "no external link") + ".",
+            before: fmt(lc.f), after: fmt(rc.f)
+          }, base)));
+        return;
+      }
+
       if (lc.r1c1 === rc.r1c1) {
         if (lc.v !== rc.v && !isEmpty(lc))
           findings.push(F("medium", "impact", name, ref,
@@ -767,10 +811,39 @@ function diffSheet(name, left, right, findings, align) {
   });
 }
 
+/* Defined names break formulas silently when they move. A deleted name leaves
+   every formula that used it unresolvable, and a repointed name changes what
+   those formulas mean without changing a character of their text — the one
+   edit a formula diff cannot see. */
+function diffNames(a, b, findings) {
+  var an = Object.keys(a).sort(), bn = Object.keys(b).sort();
+  bn.forEach(function (n) {
+    if (!(n in a)) findings.push(F("low", "name_added", "", n,
+      "Named range added: " + n, { after: b[n] }));
+  });
+  an.forEach(function (n) {
+    if (!(n in b)) findings.push(F("high", "name_deleted", "", n,
+      "Named range deleted: " + n,
+      { detail: "Any formula that referred to it can no longer resolve.", before: a[n] }));
+  });
+  an.forEach(function (n) {
+    if (n in b && a[n] !== b[n]) findings.push(F("high", "name_changed", "", n,
+      "Named range " + n + " now points somewhere else",
+      { detail: "Formulas using it changed meaning without changing text.",
+        before: a[n], after: b[n] }));
+  });
+}
+
 function compare(wbA, wbB) {
   var left = {}, right = {}, findings = [], align = {}, stale = false;
-  wbA.SheetNames.forEach(function (n) { left[n] = readSheet(wbA.Sheets[n], n); });
-  wbB.SheetNames.forEach(function (n) { right[n] = readSheet(wbB.Sheets[n], n); });
+  var namesA = readNames(wbA), namesB = readNames(wbB);
+  var upA = {}, upB = {};
+  for (var ka in namesA) upA[ka.toUpperCase()] = 1;
+  for (var kb in namesB) upB[kb.toUpperCase()] = 1;
+  wbA.SheetNames.forEach(function (n) { left[n] = readSheet(wbA.Sheets[n], n, upA); });
+  wbB.SheetNames.forEach(function (n) { right[n] = readSheet(wbB.Sheets[n], n, upB); });
+
+  diffNames(namesA, namesB, findings);
 
   [left, right].forEach(function (side) {
     for (var n in side) for (var k in side[n].cells) {
@@ -806,7 +879,8 @@ function compare(wbA, wbB) {
       ((a.rowRight || a.rowLeft) - (b.rowRight || b.rowLeft));
   });
 
-  return { left: left, right: right, findings: findings, align: align, stale: stale };
+  return { left: left, right: right, findings: findings, align: align, stale: stale,
+    names: [namesA, namesB] };
 }
 
 root.xldiff = { compare: compare, toR1C1: toR1C1, fmt: fmt, colLetter: colLetter, get: get };

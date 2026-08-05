@@ -55,6 +55,30 @@ const sgot = new Set(s.findings.map(key));
   "high|sheet_deleted|Prior year|"
 ].forEach((k) => check(sgot.has(k), k.replace(/\|/g, " ")));
 
+console.log("defined names");
+const byKind = {};
+s.findings.forEach((f) => { if (!byKind[f.kind]) byKind[f.kind] = f; });
+check(byKind.name_changed && byKind.name_changed.ref === "GrowthRate",
+  "a name repointed at another cell is high severity");
+check(byKind.name_deleted && byKind.name_deleted.severity === "high",
+  "a deleted name is high: formulas using it can no longer resolve");
+check(byKind.name_added && byKind.name_added.severity === "low",
+  "a new name is low on its own");
+
+// TAX1 is shaped exactly like a cell reference. Normalising it relative to its
+// own position makes identical formulas look different the moment a row is
+// inserted above them.
+const named = { TAX1: 1 };
+check(xldiff.toR1C1("=B7*TAX1", 8, 2, named) === xldiff.toR1C1("=B8*TAX1", 9, 2, named),
+  "a formula using a name compares equal after it moves down a row");
+check(xldiff.toR1C1("=B7*TAX1", 8, 2, named).indexOf("TAX1") !== -1,
+  "the name survives R1C1 normalisation intact");
+check(xldiff.toR1C1("=B7*TAX1", 8, 2, {}).indexOf("TAX1") === -1,
+  "and is only spared because it is known to be a name");
+check(!s.findings.some((f) => f.sheet === "Operating costs" &&
+        /^[A-Z]9$/.test(f.ref) && f.kind === "formula_changed"),
+  "the After tax row, identical text one row down, reports no formula change");
+
 console.log("an inserted column does not shift the diff");
 const oc = s.findings.filter((f) => f.sheet === "Operating costs");
 check(oc.some((f) => f.kind === "column_added" && f.ref === "column B"),
@@ -64,10 +88,16 @@ check(oc.some((f) => f.kind === "column_added" && f.ref === "column B"),
 const shifted = oc.filter((f) => /^[A-Z][457]$/.test(f.ref));
 check(!shifted.length,
   "cells that only moved right report nothing (got " + shifted.length + ")");
-check(s.align["Operating costs"].colRatio > 0.9,
-  "column alignment confidence stays high (" + s.align["Operating costs"].colRatio.toFixed(2) + ")");
-check(s.align["Operating costs"].ratio > 0.9,
-  "and inserting a column does not wreck row alignment");
+const ocAl = s.align["Operating costs"];
+check(String(ocAl.colAdded) === "2" && !ocAl.colDeleted.length,
+  "exactly one column is reported as inserted, at B");
+// The sheet shifts on both axes at once. Row alignment must survive the column
+// insertion and vice versa: each axis used to need the other solved first.
+check(String(ocAl.added) === "6" && !ocAl.deleted.length,
+  "row alignment survives it: one insertion at row 6, nothing deleted");
+check(ocAl.ratio > 0.35 && ocAl.colRatio > 0.35,
+  "both confidences stay well clear of the low-confidence threshold (rows " +
+  ocAl.ratio.toFixed(2) + ", columns " + ocAl.colRatio.toFixed(2) + ")");
 
 console.log("run breaks on both axes");
 check(sgot.has("high|run_break|Revenue build|B20"),

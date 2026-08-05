@@ -45,11 +45,14 @@ function sheet(cells) {
   return ws;
 }
 
-function book(pairs) {
+function book(pairs, names) {
   const wb = { SheetNames: [], Sheets: {} };
   for (const [name, cells] of pairs) {
     wb.SheetNames.push(name);
     wb.Sheets[name] = sheet(cells);
+  }
+  if (names) {
+    wb.Workbook = { Names: Object.keys(names).map((n) => ({ Name: n, Ref: names[n] })) };
   }
   return wb;
 }
@@ -128,6 +131,9 @@ function revenue(growth, opts) {
      overriding one in the middle is a vertical run break — the cell has the
      run continuing above and below it, which is what separates a real
      drag-fill accident from a totals row that is meant to differ. */
+  c.A24 = "Tax rate";
+  c.B24 = 0.2;
+
   c.A18 = "Monthly ramp";
   c.B18 = 100;
   let u = 100;
@@ -180,7 +186,14 @@ function costs(opts) {
     c[L + softRow] = SOFT[i];
     const total = SAL[i] + RENT[i] + SOFT[i] + (opts.withTravel ? TRAVEL[i] : 0);
     c[L + totalRow] = ["SUM(" + L + "4:" + L + softRow + ")", total];
+
+    /* Identical text in both files, but the inserted Travel row moves it down
+       one. TAX1 is shaped exactly like a cell reference, so normalising it to
+       R1C1 relative to its own position would make these two look different
+       and report a change that never happened. */
+    c[L + (totalRow + 1)] = ["" + L + totalRow + "*TAX1", total * 0.2];
   }
+  c["A" + (totalRow + 1)] = "After tax";
   return c;
 }
 
@@ -202,7 +215,11 @@ const before = book([
   ["Revenue build", revenue(0.04, { q4Exception: true, discount: 0.9, cohorts: 4 })],
   ["Operating costs", costs({})],
   ["Prior year", priorYear]
-]);
+], {
+  GrowthRate: "'Revenue build'!$B$4",
+  TAX1: "'Revenue build'!$B$24",
+  LegacyOpex: "'Operating costs'!$B$7"
+});
 
 const after = book([
   ["Revenue build", revenue(0.06, {
@@ -211,7 +228,14 @@ const after = book([
   })],
   ["Operating costs", costs({ withTravel: true, withPriorYear: true })],
   ["Sensitivity", sensitivity]
-]);
+], {
+  /* Repointed at the cohort count instead of the growth rate: every formula
+     using it changed meaning without changing text. */
+  GrowthRate: "'Revenue build'!$B$13",
+  TAX1: "'Revenue build'!$B$24",
+  /* LegacyOpex is gone, so anything referring to it can no longer resolve. */
+  Headroom: "'Sensitivity'!$B$5"
+});
 
 for (const [name, wb] of [["sample_before.xlsx", before], ["sample_after.xlsx", after]]) {
   const dest = path.join(__dirname, name);
